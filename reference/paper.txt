@@ -1,0 +1,2354 @@
+GestureDiffuCLIP: Gesture Diffusion Model with CLIP Latents
+Tenglong Ao
+Peking UniversityNo.5 Yiheyuan Road, Haidian DistrictBeijingBeijingChina100871
+Zeyi Zhang
+
+Peking UniversityNo.5 Yiheyuan Road, Haidian DistrictBeijingBeijingChina100871
+Libin Liu
+
+Peking University & National Key Lab of General AINo.5 Yiheyuan Road, Haidian DistrictBeijingBeijingChina100871
+Abstract.
+The automatic generation of stylized co-speech gestures has recently received increasing attention. Previous systems typically allow style control via predefined text labels or example motion clips, which are often not flexible enough to convey user intent accurately. In this work, we present GestureDiffuCLIP, a neural network framework for synthesizing realistic, stylized co-speech gestures with flexible style control. We leverage the power of the large-scale Contrastive-Language-Image-Pre-training (CLIP) model and present a novel CLIP-guided mechanism that extracts efficient style representations from multiple input modalities, such as a piece of text, an example motion clip, or a video. Our system learns a latent diffusion model to generate high-quality gestures and infuses the CLIP representations of style into the generator via an adaptive instance normalization (AdaIN) layer. We further devise a gesture-transcript alignment mechanism that ensures a semantically correct gesture generation based on contrastive learning. Our system can also be extended to allow fine-grained style control of individual body parts. We demonstrate an extensive set of examples showing the flexibility and generalizability of our model to a variety of style descriptions. In a user study, we show that our system outperforms the state-of-the-art approaches regarding human likeness, appropriateness, and style correctness.
+
+co-speech gesture synthesis, multi-modality, style editing, diffusion models, CLIP
+copyright: acmlicensed
+journal: TOG
+journalyear: 2023
+journalvolume: 42
+journalnumber: 4
+publicationmonth: 8
+price: 15.00
+doi: 10.1145/3592097
+submissionid: 0
+ccs: Computing methodologies Animation
+ccs: Computing methodologies Natural language processing
+ccs: Computing methodologies Neural networks
+Refer to caption
+Figure 1.Stylized gestures synthesized by our system for the same speech clip conditioned on four different text prompts.
+\Description
+1.Introduction
+Gestures are the spontaneous and stylized movements of hands and arms that occur while people talk. They energize the speech and reveal the idiosyncratic imagery of thoughts (McNeill, 1992). Recently, deep neural networks have been successfully applied to synthesize natural-looking gestures based on speech input, which facilitates the creation of human-like 3D avatars. However, the deep learning-based system often suffers from a lack of controllability, making synthesizing arbitrary stylized gestures under user control remain a challenging task.
+
+Previous neural network systems that achieve style control in gesture creation can be grouped into two categories: label-based and example-based systems. The label-based systems are typically trained on motion data with paired style labels. They allow editing of predefined styles, such as speaker identities (Ahuja et al., 2020; Yoon et al., 2020), emotions (Liu et al., 2022e), and fine-grained styles like specific hand positions (Alexanderson et al., 2020). However, the capacity of such systems is limited by the number and granularity of the style labels, while obtaining such style labels is costly. The example-based systems, in contrast, generate gestures of an arbitrary style by imitating an example given as a motion clip (Ghorbani et al., 2023) or a video (Liu et al., 2022d). The styles characterized by these examples are often vague and can hardly convey user intent accurately. A user may need to try several times with different example data to get the desired result.
+
+Recently, the Contrastive-Language-Image-Pretraining (CLIP) model (Radford et al., 2021) successfully learns the connection between natural language and images. It enables several image generation systems (Patashnik et al., 2021; Gal et al., 2022; Ramesh et al., 2022; Rombach et al., 2022) and motion generation systems (Tevet et al., 2022; Zhang et al., 2022; Tevet et al., 2023) to allow users to specify desired content and style in natural language, namely, using text prompts. The core of the CLIP model is a large-scale shared latent space for visual and textual modalities. It learns such a space using contrastive learning, which technique can be adapted to include other modalities, such as human motions (Tevet et al., 2022), into the same space. From another perspective, the CLIP model offers a flexible interface that allows users to describe their requirements accurately using multiple forms of input, such as a text prompt, a motion prompt, or even a video prompt. The CLIP model can extract semantically consistent latent representation of these prompts, which can be used by an powerful generative model, such as diffusion models (Ho et al., 2020; Song and Ermon, 2020), to fulfill the user needs.
+
+In this work, we present GestureDiffuCLIP, a co-speech gesture synthesis system that takes advantage of the CLIP latents to enable automatic creation of stylized gestures based on various style prompts. Our system learns a latent diffusion model (Rombach et al., 2022) as the gesture generator and incorporates the CLIP representation of style into it via an adaptive instance normalization (AdaIN) (Huang and Belongie, 2017) mechanism. The system accepts text, motion, and video prompts as style descriptors and create high-quality, realistic, semantically correct co-speech gestures. It can be further extended to allow fine-grained style control of individual body parts.
+
+Predicting gestures from utterances is inherently an many-to-many mapping problem. A variety of gestures can correspond to the same speech while semantic gestures and their corresponding speech are usually not perfectly aligned temporally. Such ambiguities can cause an end-to-end deep learning system to learn a mean gesture motion and lose the semantic correspondence (Ao et al., 2022; Abzaliev et al., 2022; Kucherenko et al., 2021). To alleviate this problem, we learn a gesture-transcript joint embedding space using contrastive learning combined with a temporal aggregation mechanism. This joint embedding space provides semantic cues for the generator and a semantic loss that effectively guides the system to learn the semantic correspondence between gestures and speech.
+
+Collecting a large-scale gesture dataset with diverse styles and rich, fine-grained labels is challenging. To circumvent this issue, we develop a self-supervised learning scheme to distill knowledge from the pretrained CLIP models. Specifically, we treat each gesture motion as its own style prompt and let the system reconstruct the motion based on the extracted CLIP latents. Despite never encountering other forms of style prompts during training, the system still creates satisfactory styles corresponding to arbitrary text or video prompts in a zero-shot manner.
+
+In summary, the principal contributions of this work include:
+
+• We present a novel CLIP-guided prompt-conditioned co-speech gesture synthesis system that generates realistic, stylized gestures. To the best of our knowledge, it is the first system that supports using multimodal prompts to control the style in cross-modality motion synthesis.
+• We demonstrate a successful adaptation of latent diffusion models to allow high-quality motion synthesis and propose an efficient network architecture based on transformer and AdaIN layers to incorporates style guidance into the diffusion model.
+• We propose a contrastive learning strategy to learn the semantic correspondence between gestures and transcripts. The learned joint embeddings enable synthesizing gestures with convincing semantics.
+• We develop a self-supervised training mechanism that effectively distills knowledge from a large-scale multi-modality pretrained model, alleviating the need for training data with detailed labels.
+2.Related Work
+2.1.Co-Speech Gesture Synthesis
+The early approaches for generating co-speech gestures often involve creating linguistic rules to translate speech input into a sequence of pre-collected gesture segments, which are typically referred to as rule-based methods (Cassell et al., 1994, 2001; Kipp, 2004; Kopp et al., 2006). Wagner et al. (2014) provide a comprehensive review of these methods. Rule-based methods produce interpretable and controllable results, but creating gesture datasets and rules requires significant effort. To alleviate the manual effort of designing rules in rule-based methods, data-driven approaches have gradually become predominant in this field. Nyatsanga et al. (2023) offer a thorough survey of these methods. Early data-driven approaches aim to directly learn mapping rules from data through statistical models (Neff et al., 2008; Levine et al., 2009; Levine et al., 2010) and combine them with predefined gesture units for gesture generation. Later, the powerful modeling capability of deep neural networks makes it possible to train complex end-to-end models using raw speech-gesture data directly. One option is deterministic models, such as MLP (Kucherenko et al., 2020), CNN (Habibie et al., 2021), RNN (Yoon et al., 2019, 2020; Bhattacharya et al., 2021a; Liu et al., 2022d), and Transformer (Bhattacharya et al., 2021b). Another choice is generative models, including flow-based models (Alexanderson et al., 2020; Ye et al., 2022), VAEs (Li et al., 2021a; Ghorbani et al., 2023), and VQ-VAE (Yi et al., 2022; Yazdian et al., 2022; Liu et al., 2022c). Due to the inherent many-to-many relationship between speech and gesture, end-to-end models can generate natural-looking gestures but face challenges in ensuring content matching between speech and generated gestures (Yoon et al., 2022). To address this issue, some neural systems aim to explicitly model both rhythm and semantics from the perspective of model structure (Kucherenko et al., 2021; Ao et al., 2022; Liu et al., 2022a) or training supervision strategy (Liang et al., 2022). Furthermore, hybrid systems, such as the combination of deep features and motion graphs (Zhou et al., 2022), have been proposed to harness the advantages of different approaches. Recently, diffusion models (Sohl-Dickstein et al., 2015; Song and Ermon, 2020; Ho et al., 2020) have demonstrated impressive results in image creation (Ramesh et al., 2022), human motion generation (Tevet et al., 2023; Zhang et al., 2022), and gesture synthesis (Alexanderson et al., 2022; Zhang et al., 2023). Inspired by these works, our system adapts the latent diffusion model (Rombach et al., 2022) for the co-speech gesture generation task and achieves appealing results.
+
+2.2.Style Control for Human Motion
+A typical approach to style control for human motion involves specifying a motion clip as a reference and transferring the reference clip’s style to the source motion. This task is also known as style transfer. Early works in motion style transfer integrate traditional machine learning techniques with manually defined features to infer motion styles (Hsu et al., 2005; Ma et al., 2010; Xia et al., 2015; Yumer and Mitra, 2016). Recently, deep learning-based methods have significantly enhanced motion quality. Holden et al. (2016) first propose a learning framework enabling motion style control through optimization in the motion manifold space. Du et al. (2019) improve transfer efficiency by training a conditional VAE. Mason et al. (2018) use few-shot learning to generate stylized locomotion. Aberman et al. (2020) employ a temporally invariant adaptive instance normalization (AdaIN) layer for target style injection, eliminating the need for paired data during training. Wen et al. (2021) achieve unsupervised style transfer using a flow model. Jang et al. (2022) introduce a method capable of controlling styles for individual body parts.
+
+Previous co-speech gesture synthesis systems featuring style control can be categorized according to their dependence on style labels. Early methods requiring labeled data are limited to learning a single style for each generator. (Levine et al., 2010; Neff et al., 2008; Ginosar et al., 2019). Ahuja et al. (2022) propose a strategy that efficiently adapts a source generator to a different speaker style using low-resource data. Some works learn a speaker style embedding space with labeled speaker-motion data, enabling gesture style control by sampling from this space (Ahuja et al., 2020; Yoon et al., 2020; Bhattacharya et al., 2021a). Alexanderson et al. (2020) aim at controlling fine-grained styles, such as gesturing speed and spatial scope, using preprocessed control signal-motion data. Their later work (Alexanderson et al., 2022) utilizes a diffusion model for audio-driven motion synthesis, achieving label-based style control by training the model on labeled data. For methods not requiring style labels, Habibie et al. (2022) propose a motion matching framework to achieve flexible style control. Other studies achieve arbitrary style control by imitating an example given as a video (Liu et al., 2022d) or a motion clip (Ghorbani et al., 2023; Ye et al., 2022). In this work, we utilize a CLIP-based encoder to extract a style embedding from an arbitrary text prompt and incorporate it into the generator via an AdaIN layer, guiding the synthesis of stylized gestures. Our system supports fine-grained multimodal style prompts as opposed to label-based style control. It employs a self-supervised learning scheme and eliminates the need for labeled data. Additionally, we use an autoregressive model rather than a parallel model, making it potentially suitable for real-time applications.
+
+3.System Overview
+Refer to caption
+Figure 2.Our system consists of two core components: (a) a latent diffusion model that takes speech audio and transcript as input and generate co-speech gestures, and (b) a CLIP-based encoder that extracts style embeddings from an arbitrary style prompt and incorporates them into the diffusion model via an adaptive instance normalization (AdaIN) layer. The system allows using short texts, video clips, and motion sequences to define gesture styles by encoding them into the same CLIP embedding space using corresponding pretrained encoders.
+\Description
+Refer to caption
+Figure 3. We learn an gesture-transcript joint embedding space using contrastive learning. A transcript encoder is trained to convert a transcript sentence 
+𝑻
+ into a sequence of feature codes 
+𝒁
+𝑡
+, which are then aggregated into a transcript embedding vector 
+𝒛
+𝑡
+ via max pooling. Similarly, the corresponding gesture sequence 
+𝒁
+^
+ is processed by a gesture encoder, resulting in a feature sequence 
+𝒁
+𝑔
+ and the corresponding embedding 
+𝒛
+𝑔
+. The encoders are trained using a contrastive loss that maximizes the similarity between the embeddings 
+𝒛
+𝑡
+ and 
+𝒛
+𝑔
+ of paired transcripts and gestures.
+\Description
+Our system takes the audio and transcript of a speech as input, synthesizing realistic, stylized full-body gestures that align with the speech content rhythmically and semantically. It allows using a short piece of text, namely a text prompt, a video clip, namely a video prompt, or a motion sequence, namely a motion prompt, to describe a desired style. The gestures are then generated to embody the style as much as possible.
+
+We build the system based on latent diffusion models (Rombach et al., 2022), which apply diffusion and denoising steps in a pretrained latent space. We learn this latent motion space using VQ-VAE (van den Oord et al., 2017), providing compact motion embeddings that ensure motion quality and diversity. As illustrated in Figure 2, our system is composed of two major components: (a) an end-to-end neural generator that accepts speech audio and text transcript as input and generates speech-matched gesture sequences using latent diffusion models; and (b) a CLIP-based encoder that extracts style embeddings from style prompts and integrates them into the diffusion models via an adaptive instance normalization (AdaIN) layer (Huang and Belongie, 2017) to guide the style of the generated gestures. Furthermore, we learn a joint embedding space between corresponding gestures and transcripts using contrastive learning, which provides useful semantic cues for the generator and a semantic loss that effectively directs the generator to learn semantically meaningful gestures during training.
+
+The system employs classifier-free diffusion guidance (Ho and Salimans, 2021) alongside with a self-supervised learning scheme, enabling training on motion data without style labels. In the following sections, we will elaborate on the components and their training process within our system.
+
+4.Motion Representation
+A gesture motion 
+𝑴
+=
+[
+𝒎
+𝑘
+]
+𝑘
+=
+1
+𝐾
+ is a sequence of poses, where 
+𝐾
+ denotes the motion length. Each pose 
+𝒎
+𝑘
+∈
+ℝ
+3
++
+6
+​
+𝐽
+ consists of the displacement of the character and the rotations of its 
+𝐽
+ joints. We parameterize the rotations as 6D vectors (Zhou et al., 2019), though alternative rotation representations can potentially be used instead. The raw motion representation, however, often contains redundant information. To ensure motion quality and diversity while enabling fast inference, we follow recent successful systems (Ao et al., 2022; Rombach et al., 2022; Dhariwal et al., 2020) and learn a compact motion representation using VQ-VAE (van den Oord et al., 2017).
+
+Specifically, we train VQ-VAE as an encoder-decoder pair
+
+(1)		
+𝒁
+=
+ℰ
+VQ
+​
+(
+𝑴
+)
+⇔
+𝑴
+=
+𝒟
+VQ
+​
+(
+𝒁
+)
+.
+The encoder 
+ℰ
+VQ
+ converts 
+𝑴
+ into a downsampled sequence of latent codes 
+𝒁
+=
+[
+𝒛
+𝑙
+]
+𝑙
+=
+1
+𝐿
+, where 
+𝒛
+𝑙
+∈
+ℝ
+𝐶
+ and 
+𝐶
+ is the dimension of the latent space. We refer to the ratio 
+𝑑
+=
+𝐾
+/
+𝐿
+ as the encoder’s downsampling rate, which is determined by the network structure. The decoder 
+𝒟
+VQ
+ operates on a quantized version of the latent space. It maintains a codebook consisting of 
+𝑁
+VQ
+ latent vectors. When reconstructing the original motion 
+𝑴
+ from 
+𝒁
+, the decoder maps each 
+𝒛
+𝑘
+ to its nearest codebook vector 
+𝒛
+^
+𝑙
+ and decodes the quantized latent sequence 
+𝒁
+^
+=
+[
+𝒛
+^
+𝑙
+]
+𝑙
+=
+1
+𝐿
+ into 
+𝑴
+.
+
+Our VQ-VAE model has a network structure similar to that of Jukebox (Dhariwal et al., 2020), which consists of a cascade of 1D convolutional networks. The encoder 
+ℰ
+VQ
+ and decoder 
+𝒟
+VQ
+ are learned following the standard VQ-VAE training process (van den Oord et al., 2017; Dhariwal et al., 2020). They are then frozen in the rest of training. Both the latent sequence 
+𝒁
+ and its quantized version 
+𝒁
+^
+ are used as the motion representation by the other components of the system. Specifically, we learn the gesture-transcript joint embeddings on the quantized latent sequence 
+𝒁
+^
+ in Section 5, while the latent diffusion model synthesizes gesture motions as 
+𝒁
+ in Section 6.
+
+5.Gesture-Transcript Joint Embeddings
+The many-to-many mapping between speech content and gestures poses challenges in generating semantically correct motions. To alleviate this problem, we learn a joint embedding space for gestures and speech transcripts, enabling the discovery of semantic connections between the two modalities.
+
+5.1.Architecture
+As shown in Figure 3, we train two encoders, a gesture encoder 
+ℰ
+𝐺
+ and a transcript encoder 
+ℰ
+𝑇
+, to map the gesture motion and speech transcripts into the shared embedding space respectively. Both the encoders process the input speech in sentences. The speech transcripts are tokenized using the T5 tokenizer (Xue et al., 2021) and temporally associated with the audio using the Montreal Forced Aligner (MFA) (McAuliffe et al., 2017). This procedure also aligns the transcripts with the gestures. The speech data is subsequently segmented into sentences based on the transcripts. Following this, we compute:
+
+(2)		
+𝒁
+𝑡
+=
+ℰ
+𝑇
+​
+(
+𝑻
+)
+,
+𝒁
+𝑔
+=
+ℰ
+𝐺
+​
+(
+𝒁
+^
+)
+,
+where 
+𝑻
+∈
+𝒲
+𝐿
+𝑡
+ denotes a tokenized transcript sentence parameterized as a sequence of word embeddings 
+𝑤
+∈
+𝒲
+, 
+𝒁
+^
+∈
+ℝ
+𝐿
+𝑔
+×
+𝐶
+ is the quantized latent representation of the corresponding gesture sequence. The output of the encoders, 
+𝒁
+𝑡
+∈
+ℝ
+𝐿
+𝑡
+×
+𝐶
+𝑠
+ and 
+𝒁
+𝑔
+∈
+ℝ
+𝐿
+𝑔
+×
+𝐶
+𝑠
+, are sequences of feature vectors of the same dimension 
+𝐶
+𝑠
+. Note that the lengths of these sequences, 
+𝐿
+𝑡
+ and 
+𝐿
+𝑔
+, can be different.
+
+In a speech, a semantic gesture and the utterance of its corresponding word or phrase often lack perfect alignment (Liang et al., 2022). This misalignment can confuse the encoder if the temporal correspondence between the two modalities is rigidly enforced during training. To alleviate this issue, we aggregate semantics-relevant information in each feature sequence via max pooling
+
+(3)		
+𝒛
+𝑡
+=
+max_pooling
+​
+(
+𝒁
+𝑡
+)
+,
+𝒛
+𝑔
+=
+max_pooling
+​
+(
+𝒁
+𝑔
+)
+.
+Then 
+𝒛
+𝑡
+,
+𝒛
+𝑔
+∈
+ℝ
+𝐶
+𝑠
+ are considered the embeddings of the transcripts and gestures, respectively.
+
+We employ a powerful pretrained language model, T5-base (Xue et al., 2021), as the text encoder 
+ℰ
+𝑇
+. The motion encoder 
+ℰ
+𝐺
+ is a 12-layer, 768-feature wide, encoder-only transformer with 12 attention heads, pretrained on the gesture dataset by predicting masked motions in a way similar to BERT (Devlin et al., 2019). Both encoders are subsequently fine-tuned using contrastive learning, as detailed below.
+
+5.2.Contrastive Learning
+Refer to caption
+Figure 4.An illustration of the CLIP-style contrastive loss used to train the gesture and transcript encoders.
+\Description
+We apply CLIP-style contrastive learning (Radford et al., 2021) to fine-tune the encoders. Given a batch of pairs of gesture and transcript embeddings 
+ℬ
+=
+{
+(
+𝒛
+𝑖
+𝑡
+,
+𝒛
+𝑖
+𝑔
+)
+}
+𝑖
+=
+1
+𝐵
+, where 
+𝐵
+ is the batch size, the goal of the training is to maximize the similarity of the embeddings 
+(
+𝒛
+𝑖
+𝑡
+,
+𝒛
+𝑖
+𝑔
+)
+ of the real pairs in the batch while minimizing the similarity of the incorrect pairs 
+(
+𝒛
+𝑖
+𝑡
+,
+𝒛
+𝑗
+𝑔
+)
+𝑖
+≠
+𝑗
+. As illustrated in Figure 4, this learning objective can be expressed as the sum of the gesture-to-text (g2t) cross entropy and the text-to-gesture (t2g) cross entropy computed across the batch. Formally, the loss function is
+
+ℒ
+contrast
+=
+𝔼
+ℬ
+∼
+𝒟
+[
+ℋ
+ℬ
+(
+𝒚
+g2t
+(
+𝒛
+𝑖
+𝑔
+)
+,
+𝒑
+g2t
+(
+𝒛
+𝑖
+𝑔
+)
+)
+(4)			
++
+ℋ
+ℬ
+(
+𝒚
+t2g
+(
+𝒛
+𝑗
+𝑡
+)
+,
+𝒑
+t2g
+(
+𝒛
+𝑗
+𝑡
+)
+)
+]
+.
+Each cross entropy 
+ℋ
+ is computed between a one-hot encoding 
+𝒚
+ and a softmax-normalized distribution 
+𝒑
+. 
+𝒚
+ specifies the true correspondence between the gestures and transcripts in the training batch 
+ℬ
+. 
+𝒑
+ computes the similarity between an embedding of one modality and those of the other modality. Specifically,
+
+(5)		
+𝒑
+g2t
+​
+(
+𝒛
+𝑖
+𝑔
+)
+=
+exp
+⁡
+(
+𝒛
+𝑖
+𝑔
+⋅
+𝒛
+𝑖
+𝑡
+/
+𝜏
+)
+∑
+𝑗
+=
+1
+𝐵
+exp
+⁡
+(
+𝒛
+𝑖
+𝑔
+⋅
+𝒛
+𝑗
+𝑡
+/
+𝜏
+)
+,
+𝒑
+t2g
+​
+(
+𝒛
+𝑗
+𝑡
+)
+=
+exp
+⁡
+(
+𝒛
+𝑗
+𝑡
+⋅
+𝒛
+𝑗
+𝑔
+/
+𝜏
+)
+∑
+𝑖
+=
+1
+𝐵
+exp
+⁡
+(
+𝒛
+𝑗
+𝑡
+⋅
+𝒛
+𝑖
+𝑔
+/
+𝜏
+)
+,
+where 
+𝜏
+ is the temperature of softmax.
+
+In real data, there is often no corresponding gesture for an utterance, and a semantic feature may correspond to several different gestures. Such noisy correspondence could cause instability in contrastive learning. We employ the momentum distillation (MoD) (Li et al., 2021b) technique to alleviate this problem. The key idea of MoD is to learn from the pseudo-targets generated by a momentum model. During training, we maintain a momentum version of the encoders by updating their network parameters in an exponential-moving-average (EMA) manner. Then, we use the momentum models to calculate multimodal features 
+𝒛
+~
+𝑡
+ and 
+𝒛
+~
+𝑔
+ for the training gesture-transcript pairs and compute the pseudo-targets 
+𝒑
+~
+g2t
+ and 
+𝒑
+~
+t2g
+ by substituting these features into Equation (5). The contrastive loss is then modified as
+
+ℒ
+contrast
+MoD
+=
+(
+1
+−
+𝑤
+contrast
+)
+​
+ℒ
+contrast
++
+𝑤
+contrast
+𝔼
+ℬ
+∼
+𝒟
+[
+𝐷
+𝐾
+​
+𝐿
+(
+𝒑
+~
+g2t
+(
+𝒛
+~
+𝑖
+𝑔
+)
+|
+|
+𝒑
+g2t
+(
+𝒛
+𝑖
+𝑔
+)
+)
+(6)			
++
+𝐷
+𝐾
+​
+𝐿
+(
+𝒑
+~
+t2g
+(
+𝒛
+~
+𝑗
+𝑡
+)
+|
+|
+𝒑
+t2g
+(
+𝒛
+𝑗
+𝑡
+)
+)
+]
+,
+where 
+𝐷
+𝐾
+​
+𝐿
+(
+⋅
+|
+|
+⋅
+)
+ is the KL divergence and 
+𝑤
+contrast
+ is set to 
+0.4
+.
+
+5.3.Applications of the Joint Embeddings
+Refer to caption
+(a)Transcripts retrieved based on example gestures. Note that a gesture can natually accompany several semantics.
+Refer to caption
+(b)Semantic saliency curves of two sentences. The peaks of the curves indicate the words with high semantic importance which are likely to be accompanied by semantic gestures.
+Figure 5.Applications of the gesture-transcript joint embeddings. (a) Motion-based transcripts retrieval . (b) Semantic saliency identification.
+\Description
+Refer to caption
+Figure 6.Architecture of the denoising network. The model is a multi-layer transformer with a causal attention structure. It takes the audio and transcript of a speech, along with a style prompt, as input and estimates the diffusion noise. Three CLIP-based encoders are learned to support different types of style prompts. The multimodal features are integrated into the network at various stages through semantics-aware layers and AdaIN layers, respectively. Norm refers to the layer normalization and FFN is the feed-forward network.
+\Description
+The joint embedding space, along with the encoders, provides an efficient method for measuring semantic similarity between gestures and transcripts. To demonstrate its effectiveness, we map a gesture motion into this space and retrieve the closest sentences from the transcript dataset based on the cosine distance of the embeddings. Figure 5(a) shows some results. It can be observed that the retrieved sentences may have various meanings, but can all be naturally paired with the query gestures.
+
+Besides, the computation of the embeddings involves the max pooling operator, which aggregates the most semantics-relevant information. Consequently, we can estimate the saliency of each pose or word in a gesture sequence or a transcript sentence, respectively, using the embeddings. Specifically, given a sentence 
+𝑻
+ along with its encoded feature sequence 
+𝒁
+𝑡
+ and embedding vector 
+𝒛
+𝑡
+, we compute the semantic saliency of each word as
+
+(7)		
+𝒔
+𝑡
+=
+softmax
+​
+(
+𝒁
+𝑡
+⋅
+𝒛
+𝑡
+)
+.
+As illustrated in Figure 5(b), the words with high semantic importance that are likely to be accompanied by semantic gestures will exhibit high saliency scores. This information can be considered as an important semantic cue, which will be used in our system to guide the gesture generator in creating semantically correct gestures.
+
+6.Stylized Co-Speech Gesture Diffusion Model
+The core of our system is a conditional latent generative model 
+𝒢
+ which synthesizes a sequence of latent gesture codes 
+𝒁
+=
+[
+𝒛
+𝑙
+]
+𝑙
+=
+1
+𝐿
+ conditioned on a speech and a style prompt. The latent sequence 
+𝒁
+ is then decoded into gestures using the VQ-VAE decoder 
+𝒟
+VQ
+ learned in Section 4. Formally, the generator 
+𝒢
+ computes
+
+(8)		
+𝒁
+=
+𝒢
+​
+(
+𝑨
+,
+𝑻
+,
+𝑷
+)
+where 
+𝑨
+ and 
+𝑻
+ denote the audio and transcript of the speech respectively and 
+𝑷
+ is the style prompt. The speech audio 
+𝑨
+=
+[
+𝒂
+𝑖
+]
+𝑖
+=
+1
+𝐿
+ is parameterized as a sequence of acoustic features, sampled to match the length of the gesture representation. Each 
+𝒂
+𝑖
+ encodes the onsets and amplitude envelopes that reflect the beat and volume of speech, respectively. The speech transcript 
+𝑻
+ is preprocessed as described in Section 5. The generator 
+𝒢
+ uses 
+𝑨
+ to infer low-level gesture styles such as rhythm and stress, 
+𝑻
+ for the semantic-level features, and 
+𝑷
+ to determine the overall style of the gestures.
+
+During inference, the generator 
+𝒢
+ is reformulated as an autoregressive model, where a gesture is determined by not only the speech context and style prompt but also the previous motion. Formally, the latent sequence 
+𝒁
+=
+[
+𝒛
+𝑙
+]
+𝑙
+=
+1
+𝐿
+ is generated as
+
+(9)		
+𝒛
+𝑙
+∗
+=
+𝒢
+​
+(
+[
+𝒛
+𝑖
+∗
+]
+𝑖
+=
+1
+𝑙
+−
+1
+,
+[
+𝒂
+𝑖
+]
+𝑖
+=
+1
+𝑙
++
+𝛿
+𝑎
+,
+𝑻
+,
+𝑷
+)
+,
+where we use the asterisk (
+∗
+) to indicate quantities already generated by 
+𝒢
+. Note that the generator leverages 
+𝛿
+𝑎
+ frames of future audio features to determine the current gestures.
+
+6.1.Latent Diffusion Models
+The generator 
+𝒢
+ is based on the latent diffusion model (Rombach et al., 2022), which is a variant of diffusion models that applies the forward and reverse diffusion processes in a pretrained latent feature space. The diffusion process is modeled as a Markov noising process. Starting from a latent gesture sequence 
+𝒁
+0
+ drawn from the gesture dataset, the diffusion process progressively adds Gaussian noise to the real data until its distribution approximates 
+𝒩
+​
+(
+𝟎
+,
+𝑰
+)
+. The distribution of the latent sequences thus evolves as
+
+(10)		
+𝑞
+​
+(
+𝒁
+𝑛
+|
+𝒁
+𝑛
+−
+1
+)
+=
+𝒩
+​
+(
+𝛼
+𝑛
+​
+𝒁
+𝑛
+−
+1
+,
+(
+1
+−
+𝛼
+𝑛
+)
+​
+𝑰
+)
+,
+where 
+𝒁
+𝑛
+ is the latent sequence sampled at diffusion step 
+𝑛
+, 
+𝑛
+∈
+{
+1
+,
+…
+,
+𝑁
+}
+, and 
+𝛼
+𝑛
+ is determined by the variance schedules. In contrast, the reverse diffusion process, or the denoising process, estimates the added noise in a noisy latent sequence. Starting from a sequence of random latent codes 
+𝒁
+𝑁
+∼
+𝒩
+​
+(
+𝟎
+,
+𝑰
+)
+, the denoising process progressively removes the noise and recovers the original motion 
+𝒁
+0
+.
+
+To achieve conditional gesture generation, we train a network 
+𝑬
+𝜃
+, the so-called denoising network, to predict the noise based on the noisy motion codes, the diffusion step, the speech context, and the style prompt. This network can be formulated as
+
+(11)		
+𝑬
+𝑛
+∗
+=
+𝑬
+𝜃
+​
+(
+𝒁
+𝑛
+,
+𝑛
+,
+𝑨
+,
+𝑻
+,
+𝑷
+)
+.
+During inference, the generator 
+𝒢
+ leverages the sampling algorithm of DDPM (Ho et al., 2020) to synthesize gestures. It first draws a sequence of random latent codes 
+𝒁
+𝑁
+∗
+∼
+𝒩
+​
+(
+𝟎
+,
+𝑰
+)
+ then computes a series of denoised sequences 
+{
+𝒁
+𝑛
+∗
+}
+,
+𝑛
+=
+𝑁
+−
+1
+,
+…
+,
+0
+ by iteratively removing the estimated noise 
+𝑬
+𝑛
+∗
+ from 
+𝒁
+𝑛
+∗
+. The entire process is carried out in an autoregressive manner. Specifically, we first sample the initial latent code 
+z
+1
+​
+(
+𝑁
+)
+ for the first frame and denoise it for 
+𝑁
+ steps, obtaining the generated gesture code 
+z
+1
+​
+(
+0
+)
+∗
+. Next, we generate the second frame gesture code 
+z
+2
+​
+(
+0
+)
+∗
+ by denoising an initial code 
+z
+2
+​
+(
+𝑁
+)
+ based on the previous code 
+z
+1
+​
+(
+0
+)
+∗
+ and other conditions. This process is repeated autoregressively to generate a gesture sequence, with the previous codes 
+[
+z
+𝑖
+​
+(
+𝑛
+)
+]
+𝑖
+=
+1
+𝑙
+−
+1
+ being replaced by the generated codes 
+[
+z
+𝑖
+​
+(
+0
+)
+∗
+]
+𝑖
+=
+1
+𝑙
+−
+1
+ for each frame 
+𝑙
+. This strategy is naturally extended to generate long sequences conditioned on previously generated gestures. Finally, the latent codes 
+𝒁
+0
+∗
+ are decoded into the gesture motion.
+
+As illustrated in Figure 6, our denoising network has a transformer architecture. We employ the causal attention layer proposed by Vaswani et al. (2017) that only allows the intercommunication of the current and preceding data for the causality. This architecture can be easily transformed into the autoregressive model in Equation (9). Note that we extend the definition of current data when dealing with audio features by including 
+𝛿
+𝑎
+ future frames.
+
+The denoising network fuses the multimodal conditions 
+(
+𝑨
+,
+𝑻
+,
+𝑷
+)
+ in a hierarchical manner: first, low-level audio features that relate to the speech rhythm and stress are integrated by concatenating 
+𝑨
+ with the noisy latent sequence 
+𝒁
+𝑛
+; then, high-level transcript features 
+𝑻
+ that correspond to the speech semantics are incorporated via a semantics-aware attention layer; lastly, the style prompt 
+𝑷
+ is included through a CLIP-guided AdaIn layer to control the overall style of the generated gestures.
+
+6.1.1.Semantics-Aware Attention Layer
+Inspired by recent successful attention-based multimodal systems (Jaegle et al., 2021; Rombach et al., 2022), we develop a semantics-aware attention layer based on the cross-attention mechanism (Vaswani et al., 2017) to incorporate the input transcript 
+𝑻
+. Specifically, we first extract the transcript features 
+𝒁
+𝑡
+ from 
+𝑻
+ using the pretrained text encoder 
+ℰ
+𝑇
+ as described in Section 5 and compute the semantic saliency 
+𝒔
+𝑡
+ using Equation (7). Then, we project 
+𝒁
+𝑡
+ to the key 
+𝑲
+∈
+ℝ
+𝐿
+𝑡
+×
+𝐶
+𝑡
+ and value 
+𝑽
+∈
+ℝ
+𝐿
+𝑡
+×
+𝐶
+𝑡
+ of the attention mechanism using learnable projection matrices and calculate the query 
+𝑸
+∈
+ℝ
+𝐿
+×
+𝐶
+𝑡
+ using the intermediate features of the denoising network. Finally, the semantics-aware attention layer is implemented as
+
+(12)		
+Attention
+​
+(
+𝑸
+,
+𝑲
+,
+𝑽
+)
+=
+softmax
+​
+(
+𝑸
+​
+𝑲
+𝑇
+𝐶
+𝑡
+⋅
+𝑺
+𝑡
+)
+⋅
+𝑽
+,
+where 
+𝑺
+𝑡
+∈
+ℝ
+𝐿
+×
+𝐿
+𝑡
+ is the temporally broadcasted semantic saliency matrix of 
+𝒔
+𝑡
+ that guides the network to pay extra attention to the semantically important words.
+
+6.1.2.CLIP-Guided AdaIN Layer
+We employ an adaptive instance normalization (AdaIN) layer (Huang and Belongie, 2017) to inject the information of the style prompts into the denoising network. Specifically, we leverage a pretrained CLIP encoder 
+ℰ
+CLIP
+ to convert the input style prompt into a style embedding 
+𝒛
+𝑠
+∈
+ℝ
+𝐶
+CLIP
+. Then, we learn a MLP network to map the style embedding 
+𝒛
+𝑠
+ to 
+2
+​
+𝐶
+ada
+ parameters that modify the per-channel mean and variance of the AdaIn layer with 
+𝐶
+ada
+ channels.
+
+We employ the text encoder 
+ℰ
+CLIP-T
+ of the CLIP model (Radford et al., 2021) for the text prompts and the motion encoder 
+ℰ
+CLIP-M
+ of the MotionCLIP model (Tevet et al., 2022) for the motion prompts. We further develop a CLIP-based video encoder 
+ℰ
+CLIP-V
+ for the video prompts, which consists of a pretrained CLIP image encoder (Radford et al., 2021) followed by a 
+6
+-layer transformer that temporally aggregates the image features of the video into an embedding 
+𝒛
+𝑠
+ in the CLIP space. Note that all these CLIP encoders are pretrained in a separate stage and their weights are frozen when training the denoising network.
+
+6.2.Training
+Following the standard training process of denoising diffusion models (Ho et al., 2020; Rombach et al., 2022), we train the denoising network 
+𝑬
+𝜃
+ by drawing random tuples 
+(
+𝒁
+0
+,
+𝑛
+,
+𝑨
+,
+𝑻
+,
+𝑷
+)
+ from the training dataset, then corrupting 
+𝒁
+0
+ into 
+𝒁
+𝑛
+ by adding random Gaussian noises 
+𝑬
+, applying denoising steps to 
+𝒁
+𝑛
+, and optimizing the loss
+
+(13)		
+ℒ
+net
+=
+𝑤
+noise
+​
+ℒ
+noise
++
+𝑤
+semantic
+​
+ℒ
+semantic
++
+𝑤
+style
+​
+ℒ
+style
+.
+Specifically, the ground-truth gesture motion 
+𝑴
+0
+, along with its latent representation 
+𝒁
+0
+, and the speech audio 
+𝑨
+ and transcript 
+𝑻
+ are extracted from the same speech sentence. 
+𝑛
+ is drawn from the uniform distribution 
+𝒰
+​
+{
+1
+,
+𝑁
+}
+. We do not assume that the gesture dataset contains detailed style labels. Instead, we consider the motion clip 
+𝑴
+𝑃
+ of a random length but encompassing 
+𝑴
+0
+ as the style prompt 
+𝑷
+.
+
+We first calculate the standard noise estimation loss of the diffusion models (Ho et al., 2020) defined as
+
+(14)		
+ℒ
+noise
+=
+∥
+𝑬
+−
+𝑬
+𝜃
+​
+(
+𝒁
+𝑛
+,
+𝑛
+,
+𝑨
+,
+𝑻
+,
+𝑷
+)
+∥
+2
+2
+,
+Then, we leverage a semantic loss to ensure the semantic correctness of the generated gestures. This loss is defined in the gesture-transcript joint embedding space learned in Section 5. Specifically,
+
+(15)		
+ℒ
+semantic
+=
+1
+−
+cos
+⁡
+(
+𝒛
+0
+𝑔
+,
+𝒛
+0
+𝑔
+⁣
+∗
+)
+,
+where 
+cos
+⁡
+(
+⋅
+,
+⋅
+)
+ is the cosine distance, 
+𝒛
+0
+𝑔
+ and 
+𝒛
+0
+𝑔
+⁣
+∗
+ are the gesture encodings of the ground-truth and generated motions, respectively, computed using the gesture encoder 
+ℰ
+𝐺
+ pretrained in Section 5. At last, we employ a perceptual loss to encourage the generator to follow the style prompts. This style loss is defined as
+
+(16)		
+ℒ
+style
+=
+1
+−
+cos
+⁡
+(
+ℰ
+CLIP-M
+​
+(
+𝑴
+0
+)
+,
+ℰ
+CLIP-M
+​
+(
+𝑴
+0
+∗
+)
+)
+,
+where 
+ℰ
+CLIP-M
+ is the pretrained motion encoder, and 
+𝑴
+0
+∗
+=
+𝒟
+VQ
+​
+(
+𝒁
+0
+∗
+)
+ is the generated gestures. As suggested by Kim et al. (2022), in each training iteration, we choose a random starting step 
+𝑛
+ and apply a complete denoising process to obtain 
+Z
+0
+∗
+, which is then used to compute the perceptual losses 
+ℒ
+semantic
+ and 
+ℒ
+style
+.
+
+We utilize the classifier-free guidance (Ho and Salimans, 2021) to train our model. Specifically, we let 
+𝑬
+𝜃
+ learn both the style-conditional and unconditional distributions by randomly setting 
+𝑷
+=
+∅
+ and thus disabling the AdaIN layer by 
+10
+%
+ chance during training. At inference time, the predicted noise is computed using
+
+(17)		
+𝑬
+𝑛
+∗
+=
+𝑠
+​
+𝑬
+𝜃
+​
+(
+𝒁
+𝑛
+,
+𝑛
+,
+𝑨
+,
+𝑻
+,
+𝑷
+)
++
+(
+1
+−
+𝑠
+)
+​
+𝑬
+𝜃
+​
+(
+𝒁
+𝑛
+,
+𝑛
+,
+𝑨
+,
+𝑻
+,
+∅
+)
+instead of Equation (11). This scheme further allows us to control the effectiveness of the style prompt 
+𝑷
+ by adjusting the scale factor 
+𝑠
+.
+
+6.2.1.CLIP Video Encoder
+We develop a CLIP-based video encoder 
+ℰ
+CLIP-V
+ in Section 6.1.2 to enable video clips as the style prompts. 
+ℰ
+CLIP-V
+ encapsulates a pretrained CLIP image encoder (Radford et al., 2021) whose weights are frozen and a learnable transformer network. To learn 
+ℰ
+CLIP-V
+, we render a random motion sequence 
+𝑴
+ into a video and optimize the loss function
+
+(18)		
+ℒ
+video
+=
+1
+−
+cos
+⁡
+(
+sg
+​
+(
+ℰ
+CLIP-M
+​
+(
+𝑴
+)
+)
+,
+ℰ
+CLIP-V
+​
+(
+ℛ
+​
+(
+𝑴
+;
+𝒓
+)
+)
+)
+,
+where sg represents the stop gradient operator that prevents the gradient from backpropagating through it, 
+ℛ
+ denotes the rendering operator that renders 
+𝑴
+ into a video of human skeleton poses, with camera parameters 
+𝒓
+ configured similarly to (Aberman et al., 2020), and 
+ℰ
+CLIP-M
+ is the pretrained motion encoder. This loss function ensures 
+ℰ
+CLIP-V
+ to map video clips into the same shared CLIP embedding space. Interestingly, although the video encoder is fine-tuned using only synthetic videos, we find that it can still extract meaningful semantic information from real-world videos in practice. We attribute this robustness to the pretrained image decoder, which was trained on a large dataset (Radford et al., 2021).
+
+6.3.Style Control of Body Parts
+Inspired by (Zhang et al., 2022), we extend our system to allow fine-grained styles control on individual body parts using noise combination. Considering a partition 
+𝒪
+ of the character’s body, where each body part 
+𝑜
+∈
+𝒪
+ consists of several joints, we learn 
+𝑂
+=
+|
+𝒪
+|
+ individual motion VQ-VAEs to represent the motions of each body part as latent codes 
+𝒁
+𝑜
+=
+ℰ
+VQ
+𝑜
+​
+(
+𝑴
+𝑜
+)
+. The full-body motion codes 
+𝒁
+𝒪
+∈
+ℝ
+𝑂
+×
+(
+𝐿
+×
+𝐶
+)
+ is then computed by stacking the motion codes of each body part. We then train a new latent diffusion model 
+𝑬
+𝜃
+ based on 
+𝒁
+𝒪
+ in the same way as introduced in the previous sections. At inference time, we predict full-body noises 
+{
+𝑬
+𝑛
+,
+𝑜
+∗
+}
+𝑜
+∈
+𝒪
+ conditioned on a set of style prompts 
+{
+𝑷
+𝑜
+}
+𝑜
+∈
+𝒪
+ for every body part, where each 
+𝑬
+𝑛
+,
+𝑜
+∗
+=
+𝑬
+𝜃
+​
+(
+𝒁
+𝑛
+𝒪
+,
+𝑛
+,
+𝑨
+,
+𝑻
+,
+𝑷
+𝑜
+)
+. These noises can be simply fused as 
+𝑬
+𝑛
+∗
+=
+∑
+𝑜
+∈
+𝒪
+𝑬
+𝑛
+,
+𝑜
+∗
+⋅
+𝑀
+𝑜
+, where 
+{
+𝑀
+𝑜
+}
+𝑜
+∈
+𝒪
+ are binary masks indicating the partition of bodies in 
+𝒪
+. To achieve better motion quality, we add a smoothness item to the denoising direction as suggested by Zhang et al. (2022), which is
+
+(19)		
+𝑬
+𝑛
+∗
+=
+∑
+𝑜
+∈
+𝒪
+(
+𝑬
+𝑛
+,
+𝑜
+∗
+⋅
+𝑀
+𝑜
+)
++
+𝑤
+body
+​
+∇
+𝒁
+𝑛
+𝒪
+(
+∑
+𝑖
+,
+𝑗
+∈
+𝒪
+,
+𝑖
+≠
+𝑗
+∥
+𝑬
+𝑛
+,
+𝑖
+∗
+−
+𝑬
+𝑛
+,
+𝑗
+∗
+∥
+2
+)
+,
+where 
+∇
+ denotes the gradient operator. 
+𝑤
+body
+ is set to 0.01.
+
+7.Evaluation
+In this section, we first describe the setup of our system then evaluate our results, compare them with other systems, introduce several potential applications of our system, and validate various design choices of our framework through ablation study.
+
+7.1.System Setup
+7.1.1.Data
+We train and test our system on two high-quality speech-gesture datasets: ZeroEGGS (Ghorbani et al., 2023) and BEAT (Liu et al., 2022e). The ZeroEGGS dataset contains two hours of full-body motion capture and audio from monologues performed by an English-speaking female actor in 
+19
+ different styles. We acquire the synchronized transcripts using an automatic speech recognition (ASR) tool (Alibaba, 2009). The BEAT dataset contains 
+76
+ hours of multimodal speech data, including audio, transcripts, and full-body motion captured from 
+30
+ speakers performing in eight emotional styles and four different languages. We only use the speech data of English speakers, which amounts to about 
+35
+ hours in total.
+
+7.1.2.Settings
+Our system generates motions at 
+60
+ frames per second. We train the motion VQ-VAE (Section 4) with a downsampling rate 
+𝑑
+=
+8
+, a batch size of 
+32
+, and 
+𝐶
+=
+512
+. To learn the gesture-transcript embedding space (Section 5), the values of 
+𝐶
+𝑠
+, 
+𝜏
+, and 
+𝐵
+ are set to 
+768
+, 
+0.07
+, and 
+32
+, respectively. As for the diffusion module (Section 6), the denoising network is based on a 
+12
+-layer, 
+768
+-feature wide, encoder-only transformer with 
+12
+ attention heads. The number of diffusion steps is 
+𝑁
+=
+1000
+, the training batch size is 
+128
+ per GPU, and the parameters 
+𝛿
+𝑎
+, 
+𝐶
+CLIP
+, 
+𝐶
+ada
+, 
+𝑤
+noise
+, 
+𝑤
+semantic
+, 
+𝑤
+style
+ are set to 
+8
+, 
+768
+, 
+768
+, 
+1.0
+, 
+0.1
+, and 
+0.07
+, respectively. We train the motion VQ-VAE using regular speech clips of 
+4
+ seconds in length and other models with sentence-level clips ranging from 
+1
+ second to 
+15
+ seconds in length. We train all these models using two NVIDIA Tesla V100 GPUs for about five days. During inference, it takes our system about 1.5 seconds to generate an 1-second (60 frames) gesture clip on a single Tesla V100 GPU.
+
+7.2.Results
+Refer to caption
+Figure 7.Gestures synthesized by our system conditioned on three different types of style prompts (text, video, and motion) for the same speech. The character performs angry gestures when given the text prompt the person is angry. The Hip-hop style gestures are imitated from a Hip-hop music video (Khalifa, 2011). Semantic information of a non-human video such as trees sway with the wind (RelaxingSoundsOfNature, 2018) can also be perceived by our system and guides the character to sway from side to side. As for the motion prompt, our system successfully generates arm-up gestures similar to the motion example.
+\Description
+Refer to caption
+Figure 8.Results of body part-level style control. A set of style prompts are applied to different body parts to achieve fine-grained style control.
+\Description
+Refer to caption
+Figure 9.Effect of the input style prompt controlled by adjusting the scale 
+𝑠
+ of the classifier-free guidance. A larger 
+𝑠
+ results in a more pronounced style effect.
+\Description
+Refer to caption
+Figure 10.Results of the time-varied style control by changing style prompt at each sentence.
+\Description
+Figure 7 shows the visualization results of our system generating gestures conditioned on three different types of style prompts (text, video, and motion), with the test speech taken from the ZeroEGGS dataset. Our system successfully generates realistic gestures with reasonable styles, as required by the corresponding prompts. The character performs angry gestures when given the text prompt the person is angry. The Hip-hop style gestures are imitated from a Hip-hop music video (Khalifa, 2011). Semantic information from a non-human video, such as trees sway with the wind (RelaxingSoundsOfNature, 2018), can also be perceived by our system, guiding the character to sway from side to side. As for the motion prompt, our system successfully generates arm-up gestures similar to the motion example.
+
+Figure 8 demonstrates the results of body part-aware style control using our system. We employ different prompts to control the styles of various body parts. The resulting motions produce these styles while maintaining a natural coordination among the body parts.
+
+As discussed in Section 6.2, the scale factor 
+𝑠
+ of the classifier-free guidance scheme controls the effect of the input style prompt. Increasing 
+𝑠
+ will enhance or even exaggerate the given style, which can be seen in Figure 9, where the hands of the character rise higher when increasing 
+𝑠
+ with the text prompt raise both hands.
+
+Our system allows the style of gestures to change with every sentence. As shown in Figure 10, we change the style prompts from raise both hands to out of breath, and then to Usain Bolt. The generated gestures accurately match the styles and maintain smooth transitions between different styles.
+
+Moreover, Figure 12 shows the visualization results of comparing style-conditional synthesis (the first row) with style-unconditional synthesis (the second row). Specifying style prompts for each sentence can effectively guide the character’s performance, making the co-speech gestures more vivid.
+
+Table 1.Average scores of user study with 
+95
+%
+ confidence intervals. Our system without transcript input (w/o transcript) excludes the 
+ℒ
+semantic
+ while the semantic-aware attention layer is replaced by the causal self-attention layer. Then the generator is retrained to synthesize gestures based solely on the audio. For style correctness (w/ dataset label), the text prompt contains the style label of the dataset and only describes the motion style that appears in the dataset. Note that we do not use any style label for training. Meanwhile, the text prompt utilized in the style correctness (w/ random prompt) test does not contain any style label of the dataset, and the motion style that the text prompt describes may not exist in the dataset.
+Dataset	System	
+Human Likeness 
+↑
+Appropriateness 
+↑
+Style Correctness 
+↑
+(w/ dataset label)
+Style Correctness 
+↑
+(w/ random prompt)
+BEAT	GT	
+0.47
+±
+0.08
+0.73
+±
+0.08
+-
+-
+CaMN	
+−
+0.99
+±
+0.12
+−
+1.06
+±
+0.10
+-
+-
+Ours (w/o transcript)	
+0.23
+±
+0.10
+−
+0.33
+±
+0.07
+-
+-
+Ours	
+0.31
+±
+0.07
+0.51
+±
+0.07
+-
+-
+ZeroEGGS	ZE	
+−
+0.25
+±
+0.10
+−
+1.33
+±
+0.12
+-
+-
+MD-ZE	
+-
+-
+−
+1.65
+±
+0.15
+−
+1.62
+±
+0.17
+Ours	
+0.25
+±
+0.10
+1.33
+±
+0.12
+1.65
+±
+0.15
+1.62
+±
+0.17
+7.3.Comparison
+Following the convention of recent gesture generation research (Alexanderson et al., 2020; Ghorbani et al., 2023; Ao et al., 2022), we evaluate the generated motions through a series of user studies. Quantitative evaluations are also conducted, with results provided in later sections as a reference.
+
+7.3.1.Baselines
+The BEAT dataset is released with a baseline approach, Cascaded Motion Network (CaMN), which takes the audio, transcript, emotion labels, speaker ID, and facial blendshape weights as inputs to generate gestures using a cascaded architecture. Here, we ignore the fingers and facial weights of the generated motion. Similarly, the ZeroEGGS dataset also provides a baseline, the ZeroEGGS algorithm (ZE), which encodes speech audio and a motion exemplar to synthesize target stylized gestures. ZE achieves the best performance among all deep-based models in the 
+2022
+ GENEA Challenge (Yoon et al., 2022). Because no model in previous studies supports text prompt-conditioned synthesis, we construct a baseline, MD-ZE, by combining a powerful text prompt-to-motion model, MotionDiffuse (MD) (Zhang et al., 2022), and ZeroEGGS. Specifically, MD first transfers the given text prompt into a motion exemplar, then ZE generates target stylized gestures based on the motion exemplar and input speech. For more implementation details of these baselines, please refer to Appendix B.
+
+Refer to caption
+Figure 11.Qualitative comparison between our system and MD-ZE (Zhang et al., 2022; Ghorbani et al., 2023) using speech excerpts from the user study. The left text prompt displays the style label (angry) from the dataset, while the right prompt describes a motion style absent in the dataset.
+\Description
+Refer to caption
+Figure 12.Qualitative comparison between style-conditional synthesis (first row) and style-unconditional synthesis (second row). Co-speech gestures are improved by providing a style prompt for each sentence within the speech transcript.
+\Description
+7.3.2.User Study
+We conduct user studies using pairwise comparisons, similar to the method described in (Alexanderson et al., 2022). In each test, participants are presented with two 10-second video clips synthesized by different models (including the ground truth) for the same speech, played sequentially. Participants are required to select their preferred clip based on the instruction displayed below the videos and rate their preference on a scale of 
+0
+ to 
+2
+, with 
+0
+ indicating no preference. The other clip in the video pair automatically receives the opposite score (e.g., if the participant rates the preferred video 
+1
+, the unselected video gets a score of 
+−
+1
+). We recruit participants through the Credamo platform (Credamo, 2017).
+
+We conduct four types of preference tests: human likeness, appropriateness, style correctness (with dataset label), and style correctness (with random prompt). All tests include attention checks. For the human likeness test, participants are asked whether the generated motion resembles the motion of a real human. The video clips are muted to prevent any influence from the speech. In the appropriateness test, participants rate whether the generated motion matches the rhythm and semantics of the speech. For the style correctness (w/ dataset label) test, participants are required to assess how well the generated motion represents the given text style prompt. Note that the text prompt contains a style label provided by the dataset in this test, and the videos are muted. Lastly, a similar test, style correctness (with random prompt), is conducted to evaluate the system’s generalizability. The text prompt used in this test does not contain any style label from the dataset, and the motion style that the text prompt describes may not exist in the dataset. We provide more details about the user study in Appendix A.
+
+On the BEAT dataset, we only compare our system with CaMN using human likeness and appropriateness tests, as CaMN does not support text prompt-conditioned style control in the original paper. In practice, we compare four methods: the ground-truth gestures (GT), our system (Ours), our system without transcript input (w/o transcript) for ablation, and CaMN. All the systems take only speech as input, with our system generating motion in the style-unconditional mode (w/o style prompt), and the extra speaker ID input of CaMN defaulting to the ground truth.
+
+In this user study, 
+100
+ and 
+98
+ subjects pass the attention checks for the human likeness and appropriateness tests, respectively. Table 1 shows the average scores obtained in these tests. We conducted a one-way ANOVA and a post-hoc Tukey multiple comparison test for each user study. For the human likeness test, GT, Ours, and Ours (w/o transcript) are statistically tied and outperform CaMN (
+𝑝
+<
+0.001
+). As for the appropriateness test, Ours receives a higher score compared to other methods (
+𝑝
+<
+0.001
+), but the score of Ours (w/o transcript) drops significantly due to the lack of semantic information. Based on these two motion quality-related studies, we conclude that our diffusion-based model outperforms CaMN, and the semantic modules (including the semantics-aware attention layer and 
+ℒ
+semantic
+) are crucial to ensuring semantic consistency between speech and generated gestures.
+
+On the ZeroEGGS dataset, we evaluate our system using all four preference tests. For the human likeness and appropriateness tests, we compare our system with ZE. For the style correctness tests, we compare our system with MD-ZE. We let our system generate gestures based on motion prompts for a fair comparison, where the motion prompt is randomly sampled from the training set containing four types of style (happy, sad, angry, and old). Two speech recordings in neutral style are selected as the test set to prevent the potential style information embedded in the speech from affecting the generated styles. Four text prompts are prepared for the style correctness (w/ dataset label) test: 
+{
+the person is happy, the person is sad, the person is angry, an old person is gesticulating
+}
+. As for the style correctness (w/ random prompt) test, the test style prompts either specify a speaker style (Hip-hop rapper), define a pose (holding a cup with the right hand and looking around), or describe an abstract condition (a person just lost job). Note that there is no ground truth for these test style prompts in the ZeroEGGS dataset.
+
+After the attention checks, we recorded the answers of 
+99
+ participants for the human likeness and appropriateness tests. As shown in Table 1, the difference between human-likeness scores of Ours and ZE is not significant (
+𝑝
+<
+0.05
+), while Ours outperforms ZE in the speech-matching metric (appropriateness) by a clear margin (
+𝑝
+<
+0.001
+). This is because ZE only takes speech audio as input and may lack sufficient semantic information. In the style correctness tests, 
+100
+ valid subjects score Ours higher compared to MD-ZE for text prompts containing style labels of the dataset (
+𝑝
+<
+0.001
+). The left part of Figure 11 offers a visualization demo, where the result of MD-ZE reflects some sense of sadness, but the motion of Ours is more vivid. These results confirm the efficiency of our system in style control. Our method remains robust even when given random prompts, ahead of MD-ZE (
+𝑝
+<
+0.001
+), and generates accurate stylized gestures. The visualization results are shown in the right part of Figure 11.
+
+Table 2.Quantitative evaluation on the BEAT and ZeroEGGS datasets. Motion quality-related metrics (FGD, SRGR, and SC) are only calculated on the big BEAT dataset to guarantee the accuracy of approximation of the motion distribution (FGD and SRGR) and the generalizability of the learned semantic space (SC). Style-related metric (SRA) is measured on the ZeroEGGS dataset because it has a variety of styles and the comparison system MD-ZE is trained on it. This table reports the mean (
+±
+ standard deviation) values for each metric by synthesizing on the test data 
+10
+ times.
+Dataset	System	
+FGD 
+↓
+SRGR 
+↑
+SC 
+↑
+SRA (
+%
+) 
+↑
+BEAT	GT	
+-
+1.00
+0.80
+-
+CaMN	
+110.23
+±
+0.00
+0.25
+±
+0.00
+0.33
+±
+0.00
+-
+Ours (w/o transcript)	
+97.82
+±
+2.56
+0.09
+±
+0.02
+0.11
+±
+0.03
+-
+Ours	
+85.17
+±
+3.35
+0.51
+±
+0.08
+0.58
+±
+0.15
+-
+ZeroEGGS	MD-ZE	
+-
+-
+-
+47.50
+±
+0.97
+Ours (w/o 
+ℒ
+style
+)	
+-
+-
+-
+64.28
+±
+2.17
+Ours (concatenation fusion)	
+-
+-
+-
+68.15
+±
+2.02
+Ours	
+-
+-
+-
+71.53
+±
+1.01
+7.4.Quantitative Evaluation
+We quantitatively measure the motion quality, speech-gesture content matching, and style correctness using three metrics : Fréchet Gesture Distance (FGD) (Yoon et al., 2020), Semantics-Relevant Gesture Recall (SRGR) (Liu et al., 2022e), Semantic Score (SC), and Style Recoginition Accuracy (SRA) (Jang et al., 2022).
+
+The FGD measures the distance between the distributions of latent features calculated from generated and real gestures, respectively. This metric is typically used to assess the perceptual quality of gestures. A lower FGD usually suggests higher motion quality.
+
+It has been shown that vanilla L1 distance and Probability of Correct Keypoint (PCK) are not suitable for assessing gesture performance due to the inherent many-to-many correspondence between speech and gestures (Yoon et al., 2020; Liu et al., 2022e). To address this issue, we adopt the SRGR metric proposed by Liu et al. (2022e), which uses manually-labeled semantic scores as the weights for PCK. This metric ensures that semantically relevant gestures align closely with the ground truth, while allowing for variation in other gestures, such as beat gestures. Besides, SRGR partially captures the diversity of generated gestures according to (Liu et al., 2022e). A higher SRGR indicates better performance.
+
+To evaluate the semantic coherence between speech and generated gestures, we propose a new metric, namely the semantic score (SC), to calculate the semantic similarity between generated motion and the ground-truth transcripts in the gesture-transcript embedding space (Section 5). SC can be computed as
+
+(20)		
+SC
+=
+cos
+⁡
+(
+𝒛
+𝑡
+,
+𝒛
+0
+𝑔
+⁣
+∗
+)
+,
+where 
+𝒛
+𝑡
+ and 
+𝒛
+𝑔
+⁣
+∗
+ are the ground-truth transcript encoding and the gesture encoding of the generated motion, respectively. SC 
+∈
+[
+−
+1
+,
+1
+]
+ and a higher SC suggests better speech-gesture content matching.
+
+Following (Jang et al., 2022), we pre-train a classifier on the ZeroEGGS dataset to predict motion style labels. The dataset contains 19 distinct styles, but we exclude some ambiguous ones, such as agreement, disagreement, oration, pensive, sarcastic, and threatening. For testing, we use all speech recordings in the neutral style as input speech. Text prompts are generated using a prompt template (the person is [style label]), where the style label (e.g., happy and sad) is from the dataset. We then use the neutral speech and synthetic text prompts as inputs to generate stylized gestures. Lastly, we employ the style classifier to measure the style recognition accuracy (SRA) on the test set. A higher SRA indicates better performance in terms of style control. It is important to note that SRA is limited to covering styles that appear in the dataset.
+
+We conduct motion quality-related evaluations, specifically FGD, SRGR, and SC, on the BEAT dataset only, as a large dataset is necessary to ensure accurate approximation of the motion distribution (FGD and SRGR) and generalizability of the learned semantic space (SC). For style-related evaluations (SRA), we measure performance on the ZeroEGGS dataset only, as it has a variety of styles and the baseline system MD-ZE is trained on it. The FGD, SRGR and SC are calculated using sentence-level motion segments, while 10-second segments are used to measure the SRA. We compute the mean (
+±
+ standard deviation) values for each metric by synthesizing on the test data 10 times. The test set of the BEAT dataset is composed of the first file of both conversation and self-talk sessions for each speaker who appears in the training set.
+
+As shown in Table 2, our system outperforms the baseline CaMN in motion quality-related metrics (FGD, SRGR and SC). The SC value of our system significantly decreases when the transcript input is discarded, highlighting the importance of the gesture-transcript embedding module. In terms of style control, our system outperforms the baseline MD-ZE in the SRA metric by a clear margin, which is consistent with the results of the user study (see Section 7.3.2). The SRA results of different ablation settings, i.e., Ours (w/o 
+ℒ
+style
+) and Ours (concatenation fusion), demonstrate the necessity of these components in our system.
+
+7.5.Application
+Our system enables several interesting applications. One such application involves enhancing co-speech gestures by specifying the style of each sentence in the speech and using style prompts to guide the performance of the character. This process can be automated by a large language model, such as ChatGPT (OpenAI, 2022). Specifically, we can instruct ChatGPT to generate a style prompt for each sentence in the speech and then generate stylized co-speech gestures accordingly. Figure 12 demonstrates the editing results (the first row) obtained by using generated text prompts, which are more vivid than the style-unconditional results (the second row).
+
+Another application is to let ChatGPT write a story and creating the corresponding style prompts. Then, we can translate the generated transcript into audio using a Text-To-Speech tool (Murf.AI, 2022) and use the audio as the speech input. This can result in a skillful storyteller. As shown in Figure 13, we let ChatGPT write a short joke about travel with suitable text prompts and synthesize gestures using them. The generated gestures successfully portray the joke with diverse body styles.
+
+The full prompt inputs to ChatGPT of these application examples are detailed in Appendix C. Please refer to the supplementary video for animation results.
+
+Refer to caption
+Figure 13.Qualitative result of gesture editing (Section 7.5). Both the speech transcript and text prompts are generated by ChatGPT (OpenAI, 2022). Additionally, we translate the generated transcript into audio using a Text-To-Speech tool (Murf.AI, 2022) and use the resulting audio as the speech input. Note that such synthesized voices are not seen during training.
+\Description
+7.6.Ablation Study
+We analyze the impact of the gesture-transcript embedding, the style loss, and the style fusion mechanism on our performance. The results are reflected in Table 1, Table 2, and the supplementary video.
+
+7.6.1.Gesture-Transcript Embedding
+In this experiment, we omitted the transcript embedding input of the denoising network, replaced the semantics-aware attention layer with the causal self-attention layer, and retrained the generator without the semantic loss 
+ℒ
+semantic
+. The supplementary video demonstrates that the generated motion maintains rhythmic harmony but lacks reasonable semantics. Moreover, semantics-aware metrics, such as appropriateness (Table 1) and SC (Table 2), also show a significant drop for our model (w/o transcript). These results confirm that the gesture-transcript embedding module effectively enhances the semantic consistency between speech and gestures.
+
+7.6.2.Style Loss
+In this experiment, we retrain the denoising network without the style loss 
+ℒ
+style
+. The supplementary video demonstrates that the recognizability of the generated style is reduced. The style recognition accuracy (SRA) in Table 2 also decreases. An intuitive explanation is that the style-relevant knowledge embedded in CLIP serves as a guide for the stylization of the generated gestures through the style loss. This guidance approximates style-aware supervision, even in the absence of explicit labels.
+
+7.6.3.Style Fusion Mechanism
+In this experiment, we replace the AdaIN-based style embedding fusion scheme with direct concatenation, where the style embedding is broadcasted and concatenated to the intermediate deep features in the generator for style modification. Although the SRA value of Ours (concatenation fusion) drops only slightly compared to AdaIN, the supplementary video shows that the motion generated by Ours (concatenation) exhibits jittering and unnatural movements.
+
+8.Conclusion
+In this paper, we have presented GestureDiffuCLIP, a CLIP-guided co-speech gesture synthesis system that generates stylized gestures based on arbitrary style prompts while ensuring semantic and rhythmic harmony with speech. We leverage powerful CLIP-based encoders to extract style embeddings from style prompts and incorporate them into a diffusion model-based generator through an AdaIN layer. This architecture effectively guides the style of the generated gestures. The CLIP latents make our system highly flexible, supporting short texts, motion sequences, and video clips as style prompts. We also develop a semantics-aware mechanism to ensure semantic consistency between speech and generated gestures, where a joint embedding space is learned between gestures and speech transcripts using contrastive learning. Our system can be extended to achieve style control of individual body parts through noise combination. We conduct an extensive set of experiments to evaluate our framework. Our system outperforms all baselines both qualitatively and quantitatively, as evidenced by FGD, SRGR, SC, and SRA metrics, and user study results. Regarding application, we demonstrate that our system can effectively enhance co-speech gestures by specifying style prompts for each speech sentence and using these prompts to guide the character’s performance. We can further automate this process by employing a large language model like ChatGPT, enabling a skillful storyteller.
+
+Refer to caption
+Figure 14.Gestures synthesized by our system conditioned on video prompts: Yoga poses (yogawithadriene, 2020, 2023), flying bird (Wildlife_World, 2019), dinosaur (worldofdinosaurs1, 2018), fire (Fireplace10hours, 2016), and lightning (manabouttown1, 2021).
+\Description
+In our system, styles refer to the overall appearance of motion or, more precisely, the aspects of gestures that are independent of input speech content. This encompasses both stylistic features and motion constraints. Our system processes these two types of style within a unified framework, potentially enabling users to define them using a combined prompt, such as the person is happy and holds a cup of coffee in their right hand (stylistic feature + constraints), when a powerful language model is available. Another interesting extension to our current framework could be to allow users to combine different forms of prompts for a more accurate description of a style, such as specifying a stylistic feature with a text prompt and defining motion details using a video or motion prompt. This presents a compelling direction for future work.
+
+Our system achieves zero-shot style control using unseen style prompts and generalizes to some unseen voices, such as the one synthesized by the Text-to-Speech tool used in Figure 13. However, as is common with deep learning-based approaches, the capacity and robustness of our system are constrained by the training data and the network architecture. For instance, due to the limitations of the vanilla CLIP text encoders, our system cannot accept excessively long text prompts, and users may find that some descriptions are not interpreted accurately. When employing motion clips or human videos as style prompts, our system consistently endeavors to generate gestures with similar poses to those displayed in the prompt. Nevertheless, as demonstrated in Figure 14, poses that diverge significantly from the dataset, such as many yoga poses, may not be accurately reproduced. Furthermore, since non-human videos typically lack a lucid motion semantic interpretation, the semantic connection between the video content and the generated motion style can be ambiguous. As illustrated in Figure 14, our video encoder extracts arm poses from the bird video and the dinosaur video but interprets the lightning video as the raise both hands prompt, possibly due to the shape of the lightning and the clouds. Lastly, audio inputs with acoustic features that differ substantially from the training dataset can result in unsatisfactory outcomes, where the generated motion may fail to adhere to the speech rhythm or correspond with the speech content. Enhancing the system’s generalizability and interpretability remains a practical challenge for further exploration.
+
+We learn the gesture-transcript joint embedding space using a CLIP-style contrastive learning framework, which has been shown to be effective in extracting semantic information from both modalities and enabling applications such as motion-based text retrieval and word saliency identification. CLIP-style models typically scale well and have the potential for increased power when trained on larger datasets (Radford et al., 2021). Investigating this potential presents an intriguing avenue for future research.
+
+The generated motion of our system exhibits slight foot sliding, which is a common problem in kinematically-based methods (Holden et al., 2017; Tevet et al., 2023). This can be alleviated via IK-based post-processing, but unnatural transitions in contact status may arise after post-processing (Li et al., 2022). Developing a physically-based co-speech gesture generation system could fundamentally address this problem.
+
+Finally, our system is based on a latent diffusion model, which effectively ensures motion quality but requires a large number of diffusion steps during inference, making it challenging to synthesize motions in real-time. Acceleration techniques, such as PNDM (Liu et al., 2022b), could be considered in the future to optimize the sampling efficiency.
+
+Acknowledgements.
+We would like to thank the anonymous reviewers for their constructive suggestions and feedback. We also thank Baoquan Chen for various discussions and help. This work was supported in part by start-up grants from Peking University.
+References
+(1)
+Aberman et al. (2020)Kfir Aberman, Yijia Weng, Dani Lischinski, Daniel Cohen-Or, and Baoquan Chen. 2020.Unpaired Motion Style Transfer from Video to Animation.ACM Trans. Graph. 39, 4, Article 64 (aug 2020), 12 pages.https://doi.org/10.1145/3386569.3392469
+Abzaliev et al. (2022)Artem Abzaliev, Andrew Owens, and Rada Mihalcea. 2022.Towards Understanding the Relation between Gestures and Language. In Proceedings of the 29th International Conference on Computational Linguistics. International Committee on Computational Linguistics, Gyeongju, Republic of Korea, 5507–5520.
+Ahuja et al. (2022)Chaitanya Ahuja, Dong Won Lee, and Louis-Philippe Morency. 2022.Low-Resource Adaptation for Personalized Co-Speech Gesture Generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). 20566–20576.
+Ahuja et al. (2020)Chaitanya Ahuja, Dong Won Lee, Yukiko I. Nakano, and Louis-Philippe Morency. 2020.Style Transfer for Co-speech Gesture Animation: A Multi-speaker Conditional-Mixture Approach. In Computer Vision – ECCV 2020, Andrea Vedaldi, Horst Bischof, Thomas Brox, and Jan-Michael Frahm (Eds.). Springer International Publishing, Cham, 248–265.
+Alessandro Padovani (2020)Thomas Larsson Alessandro Padovani. 2020.BVH Retargeter.Accessed: 2022-12-13.
+Alexanderson et al. (2020)Simon Alexanderson, Gustav Eje Henter, Taras Kucherenko, and Jonas Beskow. 2020.Style-Controllable Speech-Driven Gesture Synthesis Using Normalising Flows.Computer Graphics Forum 39, 2 (2020), 487–496.https://doi.org/10.1111/cgf.13946
+Alexanderson et al. (2022)Simon Alexanderson, Rajmund Nagy, Jonas Beskow, and Gustav Eje Henter. 2022.Listen, denoise, action! Audio-driven motion synthesis with diffusion models.arXiv:2211.09707 [cs.LG]
+Alibaba (2009)Alibaba. 2009.Alibaba Cloud Automatic Speech Recognition.Accessed: 2022-11-01.
+Ao et al. (2022)Tenglong Ao, Qingzhe Gao, Yuke Lou, Baoquan Chen, and Libin Liu. 2022.Rhythmic Gesticulator: Rhythm-Aware Co-Speech Gesture Synthesis with Hierarchical Neural Embeddings.ACM Trans. Graph. 41, 6, Article 209 (nov 2022), 19 pages.https://doi.org/10.1145/3550454.3555435
+Bhattacharya et al. (2021a)Uttaran Bhattacharya, Elizabeth Childs, Nicholas Rewkowski, and Dinesh Manocha. 2021a.Speech2AffectiveGestures: Synthesizing Co-Speech Gestures with Generative Adversarial Affective Expression Learning. In Proceedings of the 29th ACM International Conference on Multimedia (Virtual Event, China) (MM ’21). Association for Computing Machinery, New York, NY, USA, 2027–2036.https://doi.org/10.1145/3474085.3475223
+Bhattacharya et al. (2021b)Uttaran Bhattacharya, Nicholas Rewkowski, Abhishek Banerjee, Pooja Guhan, Aniket Bera, and Dinesh Manocha. 2021b.Text2Gestures: A Transformer-Based Network for Generating Emotive Body Gestures for Virtual Agents. In 2021 IEEE Conference on Virtual Reality and 3D User Interfaces (IEEE VR). IEEE.
+Cassell et al. (1994)Justine Cassell, Catherine Pelachaud, Norman Badler, Mark Steedman, Brett Achorn, Tripp Becket, Brett Douville, Scott Prevost, and Matthew Stone. 1994.Animated Conversation: Rule-Based Generation of Facial Expression, Gesture & Spoken Intonation for Multiple Conversational Agents. In Proceedings of the 21st Annual Conference on Computer Graphics and Interactive Techniques (SIGGRAPH ’94). Association for Computing Machinery, New York, NY, USA, 413–420.https://doi.org/10.1145/192161.192272
+Cassell et al. (2001)Justine Cassell, Hannes Högni Vilhjálmsson, and Timothy Bickmore. 2001.BEAT: The Behavior Expression Animation Toolkit. In Proceedings of the 28th Annual Conference on Computer Graphics and Interactive Techniques (SIGGRAPH ’01). Association for Computing Machinery, New York, NY, USA, 477–486.https://doi.org/10.1145/383259.383315
+Credamo (2017)Credamo. 2017.Credamo: an online data survey platform.Accessed: 2022-12-13.
+Devlin et al. (2019)Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. 2019.BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. In Proceedings of the 2019 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, Volume 1 (Long and Short Papers). Association for Computational Linguistics, Minneapolis, Minnesota, 4171–4186.https://doi.org/10.18653/v1/N19-1423
+Dhariwal et al. (2020)Prafulla Dhariwal, Heewoo Jun, Christine Payne, Jong Wook Kim, Alec Radford, and Ilya Sutskever. 2020.Jukebox: A generative model for music.arXiv preprint arXiv:2005.00341 (2020).
+Du et al. (2019)Han Du, Erik Herrmann, Janis Sprenger, Klaus Fischer, and Philipp Slusallek. 2019.Stylistic Locomotion Modeling and Synthesis Using Variational Generative Models. In Proceedings of the 12th ACM SIGGRAPH Conference on Motion, Interaction and Games (Newcastle upon Tyne, United Kingdom) (MIG ’19). Association for Computing Machinery, New York, NY, USA, Article 32, 10 pages.https://doi.org/10.1145/3359566.3360083
+Fireplace10hours (2016)Fireplace10hours. 2016.Fireplace 10 hours full HD.https://www.youtube.com/watch?v=L_LUpnjgPsoAccessed on: 2023-04-01.
+Gal et al. (2022)Rinon Gal, Or Patashnik, Haggai Maron, Amit H. Bermano, Gal Chechik, and Daniel Cohen-Or. 2022.StyleGAN-NADA: CLIP-Guided Domain Adaptation of Image Generators.ACM Trans. Graph. 41, 4, Article 141 (jul 2022), 13 pages.https://doi.org/10.1145/3528223.3530164
+Ghorbani et al. (2023)Saeed Ghorbani, Ylva Ferstl, Daniel Holden, Nikolaus F. Troje, and Marc-André Carbonneau. 2023.ZeroEGGS: Zero-shot Example-based Gesture Generation from Speech.Computer Graphics Forum 42, 1 (2023), 206–216.https://doi.org/10.1111/cgf.14734 arXiv:https://onlinelibrary.wiley.com/doi/pdf/10.1111/cgf.14734
+Ginosar et al. (2019)Shiry Ginosar, Amir Bar, Gefen Kohavi, Caroline Chan, Andrew Owens, and Jitendra Malik. 2019.Learning Individual Styles of Conversational Gesture. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR).
+Habibie et al. (2022)Ikhsanul Habibie, Mohamed Elgharib, Kripasindhu Sarkar, Ahsan Abdullah, Simbarashe Nyatsanga, Michael Neff, and Christian Theobalt. 2022.A Motion Matching-Based Framework for Controllable Gesture Synthesis from Speech. In ACM SIGGRAPH 2022 Conference Proceedings (Vancouver, BC, Canada) (SIGGRAPH ’22). Association for Computing Machinery, New York, NY, USA, Article 46, 9 pages.https://doi.org/10.1145/3528233.3530750
+Habibie et al. (2021)Ikhsanul Habibie, Weipeng Xu, Dushyant Mehta, Lingjie Liu, Hans-Peter Seidel, Gerard Pons-Moll, Mohamed Elgharib, and Christian Theobalt. 2021.Learning Speech-Driven 3D Conversational Gestures from Video. In Proceedings of the 21st ACM International Conference on Intelligent Virtual Agents (Virtual Event, Japan) (IVA ’21). Association for Computing Machinery, New York, NY, USA, 101–108.https://doi.org/10.1145/3472306.3478335
+Ho et al. (2020)Jonathan Ho, Ajay Jain, and Pieter Abbeel. 2020.Denoising Diffusion Probabilistic Models. In Advances in Neural Information Processing Systems, H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin (Eds.), Vol. 33. Curran Associates, Inc., 6840–6851.
+Ho and Salimans (2021)Jonathan Ho and Tim Salimans. 2021.Classifier-Free Diffusion Guidance. In NeurIPS 2021 Workshop on Deep Generative Models and Downstream Applications.https://openreview.net/forum?id=qw8AKxfYbI
+Holden et al. (2017)Daniel Holden, Taku Komura, and Jun Saito. 2017.Phase-Functioned Neural Networks for Character Control.ACM Trans. Graph. 36, 4, Article 42 (jul 2017), 13 pages.https://doi.org/10.1145/3072959.3073663
+Holden et al. (2016)Daniel Holden, Jun Saito, and Taku Komura. 2016.A Deep Learning Framework for Character Motion Synthesis and Editing.ACM Trans. Graph. 35, 4, Article 138 (jul 2016), 11 pages.https://doi.org/10.1145/2897824.2925975
+Hsu et al. (2005)Eugene Hsu, Kari Pulli, and Jovan Popović. 2005.Style Translation for Human Motion.ACM Trans. Graph. 24, 3 (jul 2005), 1082–1089.https://doi.org/10.1145/1073204.1073315
+Huang and Belongie (2017)Xun Huang and Serge Belongie. 2017.Arbitrary Style Transfer in Real-Time With Adaptive Instance Normalization. In Proceedings of the IEEE International Conference on Computer Vision (ICCV).
+Jaegle et al. (2021)Andrew Jaegle, Felix Gimeno, Andy Brock, Oriol Vinyals, Andrew Zisserman, and Joao Carreira. 2021.Perceiver: General Perception with Iterative Attention. In Proceedings of the 38th International Conference on Machine Learning (Proceedings of Machine Learning Research, Vol. 139), Marina Meila and Tong Zhang (Eds.). PMLR, 4651–4664.
+Jang et al. (2022)Deok-Kyeong Jang, Soomin Park, and Sung-Hee Lee. 2022.Motion Puzzle: Arbitrary Motion Style Transfer by Body Part.ACM Trans. Graph. 41, 3, Article 33 (jun 2022), 16 pages.https://doi.org/10.1145/3516429
+Khalifa (2011)Wiz Khalifa. 2011.Wiz Khalifa - Roll Up.https://www.youtube.com/watch?v=UhQz-0QVmQ0Accessed on: 2023-01-03.
+Kim et al. (2022)Gwanghyun Kim, Taesung Kwon, and Jong Chul Ye. 2022.DiffusionCLIP: Text-Guided Diffusion Models for Robust Image Manipulation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). 2426–2435.
+Kipp (2004)Michael Kipp. 2004.Gesture Generation by Imitation: From Human Behavior to Computer Character Animation.Dissertation.com, Boca Raton.
+Kopp et al. (2006)Stefan Kopp, Brigitte Krenn, Stacy Marsella, Andrew N. Marshall, Catherine Pelachaud, Hannes Pirker, Kristinn R. Thórisson, and Hannes Vilhjálmsson. 2006.Towards a Common Framework for Multimodal Generation: The Behavior Markup Language. In Proceedings of the 6th International Conference on Intelligent Virtual Agents (Marina Del Rey, CA) (IVA’06). Springer-Verlag, Berlin, Heidelberg, 205–217.https://doi.org/10.1007/11821830_17
+Kucherenko et al. (2020)Taras Kucherenko, Patrik Jonell, Sanne van Waveren, Gustav Eje Henter, Simon Alexandersson, Iolanda Leite, and Hedvig Kjellström. 2020.Gesticulator: A Framework for Semantically-Aware Speech-Driven Gesture Generation. In Proceedings of the 2020 International Conference on Multimodal Interaction (Virtual Event, Netherlands) (ICMI ’20). Association for Computing Machinery, New York, NY, USA, 242–250.https://doi.org/10.1145/3382507.3418815
+Kucherenko et al. (2021)Taras Kucherenko, Rajmund Nagy, Patrik Jonell, Michael Neff, Hedvig Kjellström, and Gustav Eje Henter. 2021.Speech2Properties2Gestures: Gesture-Property Prediction as a Tool for Generating Representational Gestures from Speech. In Proceedings of the 21th ACM International Conference on Intelligent Virtual Agents (Virtual Event, Japan) (IVA ’21). Association for Computing Machinery, New York, NY, USA.https://doi.org/10.1145/3472306.347833
+Levine et al. (2010)Sergey Levine, Philipp Krähenbühl, Sebastian Thrun, and Vladlen Koltun. 2010.Gesture Controllers.ACM Trans. Graph. 29, 4, Article 124 (jul 2010), 11 pages.https://doi.org/10.1145/1778765.1778861
+Levine et al. (2009)Sergey Levine, Christian Theobalt, and Vladlen Koltun. 2009.Real-Time Prosody-Driven Synthesis of Body Language.ACM Trans. Graph. 28, 5 (dec 2009), 1–10.https://doi.org/10.1145/1618452.1618518
+Li et al. (2021a)Jing Li, Di Kang, Wenjie Pei, Xuefei Zhe, Ying Zhang, Zhenyu He, and Linchao Bao. 2021a.Audio2Gestures: Generating Diverse Gestures From Speech Audio With Conditional Variational Autoencoders. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV). 11293–11302.
+Li et al. (2021b)Junnan Li, Ramprasaath R. Selvaraju, Akhilesh Deepak Gotmare, Shafiq Joty, Caiming Xiong, and Steven Hoi. 2021b.Align before Fuse: Vision and Language Representation Learning with Momentum Distillation. In NeurIPS.
+Li et al. (2022)Peizhuo Li, Kfir Aberman, Zihan Zhang, Rana Hanocka, and Olga Sorkine-Hornung. 2022.GANimator: Neural Motion Synthesis from a Single Sequence.ACM Trans. Graph. 41, 4, Article 138 (jul 2022), 12 pages.https://doi.org/10.1145/3528223.3530157
+Liang et al. (2022)Yuanzhi Liang, Qianyu Feng, Linchao Zhu, Li Hu, Pan Pan, and Yi Yang. 2022.SEEG: Semantic Energized Co-Speech Gesture Generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). 10473–10482.
+Liu et al. (2022a)Haiyang Liu, Naoya Iwamoto, Zihao Zhu, Zhengqing Li, You Zhou, Elif Bozkurt, and Bo Zheng. 2022a.DisCo: Disentangled Implicit Content and Rhythm Learning for Diverse Co-Speech Gestures Synthesis. In Proceedings of the 30th ACM International Conference on Multimedia (Lisboa, Portugal) (MM ’22). Association for Computing Machinery, New York, NY, USA, 3764–3773.https://doi.org/10.1145/3503161.3548400
+Liu et al. (2022e)Haiyang Liu, Zihao Zhu, Naoya Iwamoto, Yichen Peng, Zhengqing Li, You Zhou, Elif Bozkurt, and Bo Zheng. 2022e.BEAT: A Large-Scale Semantic and Emotional Multi-Modal Dataset for Conversational Gestures Synthesis. In European conference on computer vision.
+Liu et al. (2022b)Luping Liu, Yi Ren, Zhijie Lin, and Zhou Zhao. 2022b.Pseudo Numerical Methods for Diffusion Models on Manifolds. In International Conference on Learning Representations.
+Liu et al. (2022c)Xian Liu, Qianyi Wu, Hang Zhou, Yuanqi Du, Wayne Wu, Dahua Lin, and Ziwei Liu. 2022c.Audio-Driven Co-Speech Gesture Video Generation. In Advances in Neural Information Processing Systems, Alice H. Oh, Alekh Agarwal, Danielle Belgrave, and Kyunghyun Cho (Eds.).
+Liu et al. (2022d)Xian Liu, Qianyi Wu, Hang Zhou, Yinghao Xu, Rui Qian, Xinyi Lin, Xiaowei Zhou, Wayne Wu, Bo Dai, and Bolei Zhou. 2022d.Learning Hierarchical Cross-Modal Association for Co-Speech Gesture Generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). 10462–10472.
+Loper et al. (2015)Matthew Loper, Naureen Mahmood, Javier Romero, Gerard Pons-Moll, and Michael J. Black. 2015.SMPL: A Skinned Multi-Person Linear Model.ACM Trans. Graphics (Proc. SIGGRAPH Asia) 34, 6 (Oct. 2015), 248:1–248:16.
+Ma et al. (2010)Wanli Ma, Shihong Xia, Jessica K. Hodgins, Xiao Yang, Chunpeng Li, and Zhaoqi Wang. 2010.Modeling Style and Variation in Human Motion. In Proceedings of the 2010 ACM SIGGRAPH/Eurographics Symposium on Computer Animation (Madrid, Spain) (SCA ’10). Eurographics Association, Goslar, DEU, 21–30.
+manabouttown1 (2021)manabouttown1. 2021.Lightning before the thunder.https://www.youtube.com/shorts/UhHqHjCs6asAccessed on: 2023-04-01.
+Mason et al. (2018)I. Mason, S. Starke, H. Zhang, H. Bilen, and T. Komura. 2018.Few-shot Learning of Homogeneous Human Locomotion Styles.Computer Graphics Forum 37, 7 (2018), 143–153.https://doi.org/10.1111/cgf.13555
+McAuliffe et al. (2017)Michael McAuliffe, Michaela Socolof, Sarah Mihuc, Michael Wagner, and Morgan Sonderegger. 2017.Montreal Forced Aligner: Trainable Text-Speech Alignment Using Kaldi.. In Interspeech, Vol. 2017. 498–502.
+McNeill (1992)David McNeill. 1992.Hand and Mind: What Gestures Reveal about Thought.University of Chicago Press.
+Murf.AI (2022)Murf.AI. 2022.Murf.AI: An Online Text-to-Speech Tool.Accessed: 2022-12-13.
+Neff et al. (2008)Michael Neff, Michael Kipp, Irene Albrecht, and Hans-Peter Seidel. 2008.Gesture Modeling and Animation Based on a Probabilistic Re-Creation of Speaker Style.ACM Trans. Graph. 27, 1, Article 5 (mar 2008), 24 pages.https://doi.org/10.1145/1330511.1330516
+Nyatsanga et al. (2023)Simbarashe Nyatsanga, Taras Kucherenko, Chaitanya Ahuja, Gustav Eje Henter, and Michael Neff. 2023.A Comprehensive Review of Data-Driven Co-Speech Gesture Generation.https://doi.org/10.48550/ARXIV.2301.05339
+OpenAI (2022)OpenAI. 2022.ChatGPT: Optimizing Language Models for Dialogue.Accessed: 2022-12-21.
+Patashnik et al. (2021)Or Patashnik, Zongze Wu, Eli Shechtman, Daniel Cohen-Or, and Dani Lischinski. 2021.StyleCLIP: Text-Driven Manipulation of StyleGAN Imagery. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV). 2085–2094.
+Radford et al. (2021)Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, and Ilya Sutskever. 2021.Learning Transferable Visual Models From Natural Language Supervision. In Proceedings of the 38th International Conference on Machine Learning (Proceedings of Machine Learning Research, Vol. 139), Marina Meila and Tong Zhang (Eds.). PMLR, 8748–8763.
+Ramesh et al. (2022)Aditya Ramesh, Prafulla Dhariwal, Alex Nichol, Casey Chu, and Mark Chen. 2022.Hierarchical text-conditional image generation with clip latents.arXiv preprint arXiv:2204.06125 (2022).
+RelaxingSoundsOfNature (2018)RelaxingSoundsOfNature. 2018.Swaying Trees in The Wind, Rumbling Leaves, Relaxing Wind.https://www.youtube.com/watch?v=98j0V5ftlpEAccessed on: 2023-01-03.
+Rombach et al. (2022)Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. 2022.High-Resolution Image Synthesis With Latent Diffusion Models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). 10684–10695.
+Sohl-Dickstein et al. (2015)Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. 2015.Deep Unsupervised Learning using Nonequilibrium Thermodynamics. In Proceedings of the 32nd International Conference on Machine Learning (Proceedings of Machine Learning Research, Vol. 37), Francis Bach and David Blei (Eds.). PMLR, Lille, France, 2256–2265.
+Song and Ermon (2020)Yang Song and Stefano Ermon. 2020.Improved Techniques for Training Score-Based Generative Models. In Proceedings of the 34th International Conference on Neural Information Processing Systems (Vancouver, BC, Canada) (NIPS’20). Curran Associates Inc., Red Hook, NY, USA, Article 1043, 11 pages.
+Tevet et al. (2022)Guy Tevet, Brian Gordon, Amir Hertz, Amit H Bermano, and Daniel Cohen-Or. 2022.Motionclip: Exposing human motion generation to clip space. In Computer Vision–ECCV 2022: 17th European Conference, Tel Aviv, Israel, October 23–27, 2022, Proceedings, Part XXII. Springer, 358–374.
+Tevet et al. (2023)Guy Tevet, Sigal Raab, Brian Gordon, Yoni Shafir, Daniel Cohen-or, and Amit Haim Bermano. 2023.Human Motion Diffusion Model. In The Eleventh International Conference on Learning Representations.https://openreview.net/forum?id=SJ1kSyO2jwu
+van den Oord et al. (2017)Aaron van den Oord, Oriol Vinyals, and Koray Kavukcuoglu. 2017.Neural Discrete Representation Learning. In Proceedings of the 31st International Conference on Neural Information Processing Systems (Long Beach, California, USA) (NIPS’17). Curran Associates Inc., Red Hook, NY, USA, 6309–6318.
+Vaswani et al. (2017)Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Ł ukasz Kaiser, and Illia Polosukhin. 2017.Attention is All you Need. In Advances in Neural Information Processing Systems, I. Guyon, U. Von Luxburg, S. Bengio, H. Wallach, R. Fergus, S. Vishwanathan, and R. Garnett (Eds.), Vol. 30. Curran Associates, Inc.
+Wagner et al. (2014)Petra Wagner, Zofia Malisz, and Stefan Kopp. 2014.Gesture and speech in interaction: An overview.Speech Communication 57 (2014), 209–232.https://doi.org/10.1016/j.specom.2013.09.008
+Wen et al. (2021)Yu-Hui Wen, Zhipeng Yang, Hongbo Fu, Lin Gao, Yanan Sun, and Yong-Jin Liu. 2021.Autoregressive Stylized Motion Synthesis With Generative Flow. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). 13612–13621.
+Wildlife_World (2019)Wildlife_World. 2019.BIRDS IN FLIGHT.https://www.youtube.com/watch?v=a1wp1RnC7kkAccessed on: 2023-04-01.
+worldofdinosaurs1 (2018)worldofdinosaurs1. 2018.Jurassic World Evolution - All 48 Dinosaurs (1080p 60FPS).https://www.youtube.com/watch?v=czTQyUKAWKMAccessed on: 2023-04-01.
+Xia et al. (2015)Shihong Xia, Congyi Wang, Jinxiang Chai, and Jessica Hodgins. 2015.Realtime Style Transfer for Unlabeled Heterogeneous Human Motion.ACM Trans. Graph. 34, 4, Article 119 (jul 2015), 10 pages.https://doi.org/10.1145/2766999
+Xue et al. (2021)Linting Xue, Noah Constant, Adam Roberts, Mihir Kale, Rami Al-Rfou, Aditya Siddhant, Aditya Barua, and Colin Raffel. 2021.mT5: A Massively Multilingual Pre-trained Text-to-Text Transformer. In Proceedings of the 2021 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies. Association for Computational Linguistics, Online, 483–498.https://doi.org/10.18653/v1/2021.naacl-main.41
+Yazdian et al. (2022)Payam Jome Yazdian, Mo Chen, and Angelica Lim. 2022.Gesture2Vec: Clustering Gestures using Representation Learning Methods for Co-speech Gesture Generation. In 2022 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS). 3100–3107.https://doi.org/10.1109/IROS47612.2022.9981117
+Ye et al. (2022)Sheng Ye, Yu-Hui Wen, Yanan Sun, Ying He, Ziyang Zhang, Yaoyuan Wang, Weihua He, and Yong-Jin Liu. 2022.Audio-Driven Stylized Gesture Generation with Flow-Based Model. In Computer Vision – ECCV 2022, Shai Avidan, Gabriel Brostow, Moustapha Cissé, Giovanni Maria Farinella, and Tal Hassner (Eds.). Springer Nature Switzerland, Cham, 712–728.
+Yi et al. (2022)Hongwei Yi, Hualin Liang, Yifei Liu, Qiong Cao, Yandong Wen, Timo Bolkart, Dacheng Tao, and Michael J. Black. 2022.Generating Holistic 3D Human Motion from Speech.
+yogawithadriene (2020)yogawithadriene. 2020.Yoga Party — 30-Minute Home Yoga Practice.https://www.youtube.com/watch?v=VdNjYJRYgQcAccessed on: 2023-04-01.
+yogawithadriene (2023)yogawithadriene. 2023.Center - Day 29 - Pleasure.https://www.youtube.com/watch?v=RooOlcSy1nIAccessed on: 2023-04-01.
+Yoon et al. (2020)Youngwoo Yoon, Bok Cha, Joo-Haeng Lee, Minsu Jang, Jaeyeon Lee, Jaehong Kim, and Geehyuk Lee. 2020.Speech Gesture Generation from the Trimodal Context of Text, Audio, and Speaker Identity.ACM Trans. Graph. 39, 6, Article 222 (nov 2020), 16 pages.https://doi.org/10.1145/3414685.3417838
+Yoon et al. (2019)Youngwoo Yoon, Woo-Ri Ko, Minsu Jang, Jaeyeon Lee, Jaehong Kim, and Geehyuk Lee. 2019.Robots Learn Social Skills: End-to-End Learning of Co-Speech Gesture Generation for Humanoid Robots. In 2019 International Conference on Robotics and Automation (ICRA). 4303–4309.https://doi.org/10.1109/ICRA.2019.8793720
+Yoon et al. (2022)Youngwoo Yoon, Pieter Wolfert, Taras Kucherenko, Carla Viegas, Teodor Nikolov, Mihail Tsakov, and Gustav Eje Henter. 2022.The GENEA Challenge 2022: A Large Evaluation of Data-Driven Co-Speech Gesture Generation. In Proceedings of the 2022 International Conference on Multimodal Interaction (Bengaluru, India) (ICMI ’22). Association for Computing Machinery, New York, NY, USA, 736–747.https://doi.org/10.1145/3536221.3558058
+Yumer and Mitra (2016)M. Ersin Yumer and Niloy J. Mitra. 2016.Spectral Style Transfer for Human Motion between Independent Actions.ACM Trans. Graph. 35, 4, Article 137 (jul 2016), 8 pages.https://doi.org/10.1145/2897824.2925955
+Zhang et al. (2023)Fan Zhang, Naye Ji, Fuxing Gao, and Yongping Li. 2023.DiffMotion: Speech-Driven Gesture Synthesis Using Denoising Diffusion Model. In MultiMedia Modeling: 29th International Conference, MMM 2023, Bergen, Norway, January 9–12, 2023, Proceedings, Part I. Springer, 231–242.
+Zhang et al. (2022)Mingyuan Zhang, Zhongang Cai, Liang Pan, Fangzhou Hong, Xinying Guo, Lei Yang, and Ziwei Liu. 2022.MotionDiffuse: Text-Driven Human Motion Generation with Diffusion Model.arXiv preprint arXiv:2208.15001 (2022).
+Zhou et al. (2022)Chi Zhou, Tengyue Bian, and Kang Chen. 2022.GestureMaster: Graph-Based Speech-Driven Gesture Generation. In Proceedings of the 2022 International Conference on Multimodal Interaction (Bengaluru, India) (ICMI ’22). Association for Computing Machinery, New York, NY, USA, 764–770.https://doi.org/10.1145/3536221.3558063
+Zhou et al. (2019)Yi Zhou, Connelly Barnes, Jingwan Lu, Jimei Yang, and Hao Li. 2019.On the Continuity of Rotation Representations in Neural Networks. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR).
+Appendix ADetails of User Study
+A comparison pair contains two 
+10
+-second videos that are played in order from left to right. We generate each pair using the same speech and character model. The user study questionnaires are created using the Human Behavior Online (HBO) tool offered by the Credamo platform (Credamo, 2017). This tool is designed to conduct psychological experiment sample collection without complex programming. All tests and questionnaires are composed of 
+24
+ video pairs. An experiment takes an average of 
+10
+ minutes to complete. We recruit participants from the US and China through Credamo. Participants who take tests with sound are required to speak English fluently. Following (Alexanderson et al., 2022), an attention check is randomly introduced in the experiment to screen valid samples. Specifically, a text message: attention: please select the rightmost option appears both at the bottom of the video pair for the whole duration of the question and in the video during the transition gap between the two clips. Samples that fail the attention check are not used for final results.
+
+A.1.Motion-Quality Study
+A.1.1.BEAT Dataset
+We select 24 speech segments from the BEAT dataset’s test set to create gestures, generating 24 video clips for each method. We compare four approaches: GT, Ours, Ours (w/o transcript), and CaMN, leading to 12 potential pairwise combinations for side-by-side demonstrations. This results in a total of 288 video pairs (24 speech samples 
+×
+ 12 combinations). Each participant is asked to assess 24 video pairs, encompassing all 24 speech samples. Each of the 12 possible comparison combinations appears twice. The speech samples and pairing of comparisons are randomized for each participant.
+
+A.1.2.ZeroEGGS Dataset
+We select 
+6
+ audio clips from the ZeroEGGS test recordings in neutral style (003_Neutral_2 and 004_Neutral_3) to synthesize gestures based on 
+4
+ different styles (happy, sad, angry, and old), yielding 
+24
+ video clips for each system. We compare two systems, ZE and Ours, in this study. During the assessment, each participant encounters all 24 video clips (
+6
+ audio clips 
+×
+ 
+4
+ styles) once in a randomized order, with the outcomes of ZE and Ours evenly distributed in the front position of each video pair.
+
+A.2.Style-Control Study on the ZeroEGGS Dataset
+The configurations for the style correctness (w/ dataset label) and style correctness (w/ random prompt) tests are identical, except for the input text prompt. In each study, we use the same 
+6
+ audio clips from experiment A.1.2 to generate motions conditioned on 
+4
+ text prompts. This leads to 24 video clips for each system, MD-ZE and Ours, in each test. For the style correctness (w/ dataset label), the text prompts are: 
+{
+the person is happy, the person is sad, the person is angry, an old person is gesticulating
+}
+. For the style correctness (w/ random prompt) test, the text prompts are: 
+{
+Hip-hop rapper, holding a cup with the right hand, looking around, a person just lost job
+}
+. Again, each participant evaluates these 
+24
+×
+2
+ video clips in pairs in a randomized sequentially, where the resulting motion of MD-ZE and Ours evenly distributed in the front position of each video pair.
+
+Appendix BImplementation Details of Baselines
+Refer to caption
+Figure 15.Prompt inputs to ChatGPT (OpenAI, 2022).
+\Description
+At the time of writing this work, the authors of CaMN (Liu et al., 2022e) have not provided the pre-trained generation model. Instead, they offered training codes for a toy dataset and a pre-trained motion auto-encoder for the calculation of FGD. We run the provided training codes on a larger dataset used in the original paper, discarding the unreleased emotion label from the conditions of the model. The FGD value of the reproduced model is 
+122.5
+, which is close to the value reported in the original paper (
+123.7
+). The visual quality of gestures synthesized by the reproduced model is similar to that shown in the video demo of CaMN. We then follow the configuration above and train a new CaMN model on a part of the BEAT dataset used in our work (Section 7.1). This model achieves better performance on FGD (
+110.23
+) and is utilized as the baseline in this paper.
+
+For the baseline MD-ZE on the ZeroEggs dataset, the two components of this baseline, i.e., MotionDiffuse (MD) (Zhang et al., 2022) and ZeroEGGS (ZE) (Ghorbani et al., 2023), are constructed using the official pre-trained models. Note that the skeletons of the two models are different. We thus retarget the motion prompt generated by MD to fit the interface of ZE. Specifically, we first convert the generated motion prompt, represented as SMPL (Loper et al., 2015) joint positions, into joint rotations and save them as a BVH file. Then, we retarget the prompt in SMPL skeleton to the ZeroEGGS skeleton using a Blender add-on, BVH Retargeter (Alessandro Padovani, 2020).
+
+Appendix CPrompts for ChatGPT
+Figure 15 demonstrates the prompt inputs for ChatGPT (OpenAI, 2022) in Section 7.5.
+
+◄ ar5iv homepage Feeling
+lucky? Conversion
+report Report
+an issue View original
+on arXiv►
+Copyright Privacy Policy Generated on Thu Feb 29 17:50:12 2024 by LaTeXMLMascot Sammy

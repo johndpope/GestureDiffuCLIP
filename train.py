@@ -152,6 +152,12 @@ def main():
         lr=config.training.learning_rate
     )
 
+
+    # Add learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5, verbose=True
+    )
+
     train_gesture_transcript_encoder(gesture_transcript_encoder, vqvae, dataloader, optimizer, accelerator, config)
 
 if __name__ == "__main__":
