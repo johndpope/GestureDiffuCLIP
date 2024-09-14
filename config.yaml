@@ -1,0 +1,43 @@
+data:
+  data_dir: path/to/data
+  audio_dir: path/to/audio
+  transcript_dir: path/to/transcripts
+  alignment_dir: path/to/alignments
+  gesture_dir: path/to/gestures
+  gesture_fps: 60
+
+mfa:
+  model: english
+
+model:
+  vqvae:
+    input_dim: 135
+    hidden_dim: 256
+    num_embeddings: 1024
+    embedding_dim: 512
+
+  gesture_transcript_encoder:
+    embedding_dim: 512
+    hidden_dim: 1024
+    nhead: 8
+    num_layers: 6
+    t5_model: t5-base
+
+  style_encoder:
+    model_name: openai/clip-vit-base-patch32
+
+  denoising_network:
+    d_model: 512
+    nhead: 8
+    num_layers: 6
+    style_dim: 512
+
+training:
+  batch_size: 32
+  learning_rate: 1.0e-4
+  num_epochs: 50
+  save_every: 5  # Save checkpoint every 5 epochs
+
+wandb:
+  project_name: gesturediffuclip
+  entity: 🏄
